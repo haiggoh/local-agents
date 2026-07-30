@@ -34,6 +34,7 @@ curl -s http://localhost:$PORT/v1/chat/completions -H 'Content-Type: application
 For long generations use `./bin/librarian-dispatch.py` (SSE + stall watchdog).
 
 ## Diagnostics
+- `./bin/direct-route-acceptance.py --port <p>` — validate the fork patches (system-msg normalization, output-limit, KV-cache hit) on a live server.
 - `./bin/tournament-dispatch.py` — Stage-A smoke test across your registered models (edit its MODELS list).
 - `./bin/cancellation-matrix.py --port <p>` — verify disconnect/timeout retires work (admission safety).
 - `./bin/check-tool-roundtrip.py` — after a local session, verify the native tool round-trip + no leak.
