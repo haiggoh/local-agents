@@ -1,0 +1,8 @@
+{
+  "_comment": "CANDIDATE narrow context profile for LOCAL Claude Code sessions (direct vllm-mlx routing). NOT wired into the launcher yet — activate with `claude --settings <this file>` only after measuring /context before/after. See local-profile-notes.md for the full protocol and the bigger levers (they are LAUNCHER FLAGS, not settings keys). This file holds ONLY confirmed-valid keys so it can never error a launch; the aggressive research-derived keys are listed in the notes as verify-then-test candidates, deliberately kept OUT of here.",
+  "permissions": {
+    "deny": [
+      "NotebookEdit"
+    ]
+  }
+}
