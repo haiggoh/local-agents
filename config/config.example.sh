@@ -53,3 +53,14 @@ la_register qwen-3.6-operator      Qwen3.6-27B-UD-MLX-4bit            vllm   qwe
 la_register qwen-3.6-thinking      Qwen3.6-27B-UD-MLX-4bit            vllm   qwen  qwen3       true  claude-opus-4-8           high
 la_register deepseek-r1-architect  DeepSeek-R1-Distill-Qwen-32B-4bit  vllm   qwen  deepseek_r1 true  claude-opus-4-8           max
 la_register llama-scout            Llama-4-Scout-17B-16E-Instruct-4bit mlx_lm llama ""         false claude-haiku-4-5-20251001 low
+
+# --- selector presets (the csl menu) -----------------------------------------
+# Convenience launch options: (label, registered alias, effort). Each REUSES the aliased model's
+# server — effort is a launcher flag, not a new model — so fast/high/xhigh variants of one model
+# don't spin up duplicate servers. Comment all out to fall back to one entry per registered model.
+la_preset "operator — fast (medium)"      qwen-3.6-operator     medium
+la_preset "operator — default (high)"     qwen-3.6-operator     high
+la_preset "operator — deep (xhigh)"       qwen-3.6-operator     xhigh
+la_preset "thinking — reasoning"          qwen-3.6-thinking     high
+la_preset "architect — validator (max)"   deepseek-r1-architect max
+la_preset "scout — utility (dispatch)"    llama-scout           low

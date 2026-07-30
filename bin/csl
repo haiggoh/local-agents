@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # csl — "claude session local": thin front-end for launch-claude-agent.sh.
-# No arg -> numbered menu built from your configured aliases. Any arg -> passed straight through.
-# Duplicates NO config: the launcher + config registry stay the single source of truth.
+# No arg -> numbered menu (from config presets, else one per registered model).
+# Any arg -> passed straight through to the launcher. Duplicates NO config.
 set -uo pipefail
-CSL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Resolve symlinks so `csl` on PATH (a symlink into this repo) finds the config (portable).
+_s="${BASH_SOURCE[0]}"; while [ -h "$_s" ]; do _d="$(cd -P "$(dirname "$_s")" && pwd)"; _s="$(readlink "$_s")"; case "$_s" in /*) ;; *) _s="$_d/$_s";; esac; done
+CSL_DIR="$(cd -P "$(dirname "$_s")" && pwd)"
 LAUNCHER="${CSL_LAUNCHER:-$CSL_DIR/launch-claude-agent.sh}"
 
 if [ "$#" -gt 0 ]; then exec "$LAUNCHER" "$@"; fi
@@ -12,13 +14,23 @@ if [ "$#" -gt 0 ]; then exec "$LAUNCHER" "$@"; fi
 . "$CSL_DIR/../config/config-lib.sh"
 la_load_config || exit 1
 
-echo "Local agents — pick a model to launch (config: ${LA_CONFIG_SOURCE}):"
-i=1; for a in "${LA_ALIASES[@]}"; do
-  printf "  %d) %-26s serve=%s effort=%s thinking=%s\n" "$i" "$a" "${LA_SERVE[$a]}" "${LA_EFFORT[$a]}" "${LA_THINK[$a]}"
-  i=$((i+1))
-done
-printf "Selection [1]: "; read -r choice; choice="${choice:-1}"
-if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt "${#LA_ALIASES[@]}" ]; then
-  echo "Invalid selection."; exit 1
+echo "Local agents — pick a session to launch (config: ${LA_CONFIG_SOURCE}):"
+if [ "${#LA_PRESET_LABEL[@]}" -gt 0 ]; then
+  # preset menu (label + effort); each reuses its model's server
+  n=${#LA_PRESET_LABEL[@]}
+  for ((i=0; i<n; i++)); do
+    printf "  %d) %-30s [%s, effort=%s]\n" "$((i+1))" "${LA_PRESET_LABEL[$i]}" "${LA_PRESET_ALIAS[$i]}" "${LA_PRESET_EFFORT[$i]}"
+  done
+  printf "Selection [1]: "; read -r c; c="${c:-1}"
+  if ! [[ "$c" =~ ^[0-9]+$ ]] || [ "$c" -lt 1 ] || [ "$c" -gt "$n" ]; then echo "Invalid selection."; exit 1; fi
+  exec "$LAUNCHER" "${LA_PRESET_ALIAS[$((c-1))]}" "${LA_PRESET_EFFORT[$((c-1))]}"
+else
+  # fallback: one entry per registered model at its default effort
+  n=${#LA_ALIASES[@]}
+  for ((i=0; i<n; i++)); do a="${LA_ALIASES[$i]}"
+    printf "  %d) %-26s serve=%s effort=%s thinking=%s\n" "$((i+1))" "$a" "${LA_SERVE[$a]}" "${LA_EFFORT[$a]}" "${LA_THINK[$a]}"
+  done
+  printf "Selection [1]: "; read -r c; c="${c:-1}"
+  if ! [[ "$c" =~ ^[0-9]+$ ]] || [ "$c" -lt 1 ] || [ "$c" -gt "$n" ]; then echo "Invalid selection."; exit 1; fi
+  exec "$LAUNCHER" "${LA_ALIASES[$((c-1))]}"
 fi
-exec "$LAUNCHER" "${LA_ALIASES[$((choice-1))]}"

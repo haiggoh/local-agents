@@ -10,7 +10,10 @@
 #   [effort-override] optional: low|medium|high|xhigh|max (overrides the alias's default effort)
 set -uo pipefail
 
-LAUNCH_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Resolve symlinks so invocation via a symlink (e.g. ~/.claude/scripts/local-inference/…) still
+# finds this repo's config. Portable (no readlink -f, works on macOS bash 3.2).
+_s="${BASH_SOURCE[0]}"; while [ -h "$_s" ]; do _d="$(cd -P "$(dirname "$_s")" && pwd)"; _s="$(readlink "$_s")"; case "$_s" in /*) ;; *) _s="$_d/$_s";; esac; done
+LAUNCH_DIR="$(cd -P "$(dirname "$_s")" && pwd)"
 # shellcheck source=/dev/null
 . "$LAUNCH_DIR/../config/config-lib.sh"
 la_load_config || exit 1

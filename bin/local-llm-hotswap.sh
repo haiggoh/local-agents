@@ -7,7 +7,9 @@
 # healthy model already running on another port (so it can't shut down a live local session).
 set -uo pipefail
 
-HOTSWAP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Resolve symlinks so invocation via a symlink still finds this repo's config (portable).
+_s="${BASH_SOURCE[0]}"; while [ -h "$_s" ]; do _d="$(cd -P "$(dirname "$_s")" && pwd)"; _s="$(readlink "$_s")"; case "$_s" in /*) ;; *) _s="$_d/$_s";; esac; done
+HOTSWAP_DIR="$(cd -P "$(dirname "$_s")" && pwd)"
 # shellcheck source=/dev/null
 . "$HOTSWAP_DIR/../config/config-lib.sh"
 la_load_config || exit 1

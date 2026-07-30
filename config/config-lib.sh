@@ -27,6 +27,14 @@ la_register() {
   LA_REASONP[$alias]="$5"; LA_THINK[$alias]="$6"; LA_SPOOF[$alias]="$7"; LA_EFFORT[$alias]="$8"
 }
 
+# --- optional selector PRESETS -----------------------------------------------
+# Convenience launch options for the csl menu: (label, registered alias, effort). Presets
+# REUSE the aliased model's server — effort is a launcher flag, not a new model — so listing
+# fast/high/xhigh variants of one model does NOT spin up duplicate servers. If no presets are
+# registered, csl falls back to one entry per registered model at its default effort.
+LA_PRESET_LABEL=(); LA_PRESET_ALIAS=(); LA_PRESET_EFFORT=()
+la_preset() { LA_PRESET_LABEL+=("$1"); LA_PRESET_ALIAS+=("$2"); LA_PRESET_EFFORT+=("$3"); }
+
 # Load config.local.sh (private) if it exists, else config.example.sh (shipped defaults).
 la_load_config() {
   if [ -f "$LA_CONFIG_DIR/config.local.sh" ]; then
