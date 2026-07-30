@@ -1,0 +1,11 @@
+# Your private overlay — NEVER published (this is the whole point of the overlay design).
+config/config.local.sh
+
+# runtime / backups / caches
+*.bak
+*.bak-*
+__pycache__/
+*.pyc
+*.log
+.DS_Store
+.pytest_cache/

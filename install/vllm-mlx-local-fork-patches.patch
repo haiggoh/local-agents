@@ -1,0 +1,136 @@
+From 54ba9ffbe3801fa387d2e5615ac3305642fea96b Mon Sep 17 00:00:00 2001
+From: haiggoh <brantsch.h@gmail.com>
+Date: Wed, 29 Jul 2026 10:41:20 +0200
+Subject: [PATCH] Local fork patches for direct Claude Code routing (M4 Max /
+ MLX)
+
+Three patches required for direct Claude Code -> vllm-mlx routing that are
+NOT in upstream v0.4.0 (base commit 0dd1157). Re-apply from this branch (or
+the exported .patch) after any reinstall/reset.
+
+1. api/utils.py _config_indicates_vlm -> False for model_type "llama4"
+   so Llama-4-Scout uses the text route (mlx_lm handles full llama4 text gen)
+   instead of the qwen3_5 VLM text-extraction pipeline it can't fit.
+
+2. engine/chat_template_safety.py _coalesce_system_messages: merges all
+   system-role content into ONE leading system block. Required because direct
+   routing (no gateway relay adapter) otherwise lands Claude Code's top-level
+   system + per-turn <system-reminder> as interleaved system turns, which the
+   Qwen chat template rejects with "System message must be at the beginning"
+   (500). Upstream equivalent PR #646 is still OPEN -> keep this local patch.
+
+3. engine/simple.py MLLM-path KV-cache probe uses the shared
+   _cache_class_is_system_snapshot_safe (accepts KVCache + ArraysCache) so
+   Qwen3.6's hybrid qwen3_5 arch (ArraysCache for its GatedDeltaNet linear
+   layers) can use the system-prefix snapshot cache. Turns per-turn ~64k-char
+   prefill from a cold re-prefill into a cross-turn cache HIT.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ vllm_mlx/api/utils.py                   | 10 +++++++
+ vllm_mlx/engine/chat_template_safety.py | 37 ++++++++++++++++++++++++-
+ vllm_mlx/engine/simple.py               | 14 ++++++++--
+ 3 files changed, 58 insertions(+), 3 deletions(-)
+
+diff --git a/vllm_mlx/api/utils.py b/vllm_mlx/api/utils.py
+index 1afd3df..62941a3 100644
+--- a/vllm_mlx/api/utils.py
++++ b/vllm_mlx/api/utils.py
+@@ -436,6 +436,16 @@ def _try_read_config_json(name_or_path: str) -> dict | None:
+ 
+ def _config_indicates_vlm(config: dict) -> bool:
+     """Inspect a parsed config.json dict for multimodal markers."""
++    # WORKAROUND (2026-07-26): Llama-4 ("llama4") is natively multimodal, so this would
++    # return True and route through the VLM text-model extraction in
++    # text_model_from_vlm._import_text_model_classes() — which only special-cases gemma4
++    # and otherwise HARDCODES qwen3_5.TextModel, mis-loading llama4 weights (rms_norm 128
++    # head-dim mismatch). We use Llama-4-Scout only for TEXT, and mlx_lm.load handles full
++    # llama4 text generation directly, so force the plain text-LLM path for it here.
++    # Remove if vllm-mlx gains a real llama4 text-extraction branch. See memory
++    # local-stack-late-july-2026-smoketest.
++    if str(config.get("model_type", "")).lower() == "llama4":
++        return False
+     archs = config.get("architectures") or []
+     if isinstance(archs, list):
+         for arch in archs:
+diff --git a/vllm_mlx/engine/chat_template_safety.py b/vllm_mlx/engine/chat_template_safety.py
+index 517383a..5468fae 100644
+--- a/vllm_mlx/engine/chat_template_safety.py
++++ b/vllm_mlx/engine/chat_template_safety.py
+@@ -87,4 +87,39 @@ def normalize_messages_for_chat_template(messages: list[Any]) -> list[dict]:
+             if not isinstance(parsed, dict):
+                 parsed = {"value": parsed}
+             function["arguments"] = parsed
+-    return normalized
++
++    return _coalesce_system_messages(normalized)
++
++
++def _coalesce_system_messages(normalized: list[dict]) -> list[dict]:
++    """Merge all system-role messages into a single leading system message.
++
++    Qwen (and most chat templates) require the sole system message at index 0 and raise
++    ``TemplateError: System message must be at the beginning`` on an interleaved or repeated
++    system role. Anthropic clients like Claude Code emit a top-level system plus per-turn
++    ``<system-reminder>`` content that, when routed DIRECTLY to this server (no gateway relay /
++    proxy in front to join system blocks), can land as system turns past index 0. We join all
++    system text, in order, into one leading system message so direct routing just works.
++    Non-system turns keep their order and content untouched. A single leading system message
++    (the normal case) is returned unchanged.
++    """
++    system_texts: list[str] = []
++    others: list[dict] = []
++    for message in normalized:
++        if isinstance(message, dict) and message.get("role") == "system":
++            content = message.get("content")
++            if isinstance(content, str):
++                if content:
++                    system_texts.append(content)
++            elif isinstance(content, list):
++                for block in content:
++                    if isinstance(block, dict) and block.get("type") == "text" \
++                            and isinstance(block.get("text"), str) and block["text"]:
++                        system_texts.append(block["text"])
++                    elif isinstance(block, str) and block:
++                        system_texts.append(block)
++        else:
++            others.append(message)
++    if not system_texts:
++        return others
++    return [{"role": "system", "content": "\n\n".join(system_texts)}] + others
+diff --git a/vllm_mlx/engine/simple.py b/vllm_mlx/engine/simple.py
+index 7f902bd..8bb5a17 100644
+--- a/vllm_mlx/engine/simple.py
++++ b/vllm_mlx/engine/simple.py
+@@ -510,8 +510,18 @@ class SimpleEngine(BaseEngine):
+                             probe_cache = make_prompt_cache(
+                                 self._text_model, max_kv_size=self._max_kv_size or None
+                             )
++                            # Use the SAME snapshot-safety gate as the pure-LLM path
++                            # (_cache_class_is_system_snapshot_safe accepts KVCache AND
++                            # ArraysCache). The old check here required KVCache-only, which
++                            # wrongly rejected hybrid qwen3_5/qwen3_next TextModels whose linear
++                            # (GatedDeltaNet) layers use ArraysCache — disabling the system KV
++                            # cache for Qwen3.6 (a vision-config model → MLLM text route) and
++                            # forcing a full re-prefill of the 64k system prompt every turn.
++                            # ArraysCache is already deemed snapshot-safe on the pure-LLM path;
++                            # RotatingKVCache (bounded max_kv_size) is still correctly rejected.
+                             self._supports_system_kv_cache = bool(probe_cache) and all(
+-                                isinstance(c, KVCache) for c in probe_cache
++                                self._cache_class_is_system_snapshot_safe(c)
++                                for c in probe_cache
+                             )
+                             if not self._supports_system_kv_cache:
+                                 cache_types = sorted(
+@@ -519,7 +529,7 @@ class SimpleEngine(BaseEngine):
+                                 )
+                                 logger.info(
+                                     "System KV cache snapshot disabled for MLLM "
+-                                    "text routing: TextModel returned non-KVCache "
++                                    "text routing: TextModel returned non-snapshot-safe "
+                                     "entries (%s); _stream_generate_text will use "
+                                     "the uncached path",
+                                     cache_types,
+-- 
+2.50.1 (Apple Git-155)
+

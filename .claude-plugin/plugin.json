@@ -1,0 +1,9 @@
+{
+  "name": "local-agents",
+  "version": "0.1.0",
+  "description": "Run Claude Code on LOCAL MLX models (Apple Silicon) as an additive overlay: direct vllm-mlx routing (native transcripts/history preserved), a config-driven model registry, self-preservation-aware local agents, and dispatch/diagnostic harnesses. Your private paths/keys stay in a gitignored config.local — nothing of yours is published. Works with plain `claude` and wrapped launchers.",
+  "author": { "name": "Heiko Brantsch" },
+  "homepage": "https://github.com/haiggoh/local-agents",
+  "license": "MIT",
+  "keywords": ["local", "mlx", "apple-silicon", "vllm-mlx", "offline", "budget", "inference", "agents", "overlay", "qwen", "dispatch"]
+}

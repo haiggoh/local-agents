@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# csl — "claude session local": thin front-end for launch-claude-agent.sh.
+# No arg -> numbered menu built from your configured aliases. Any arg -> passed straight through.
+# Duplicates NO config: the launcher + config registry stay the single source of truth.
+set -uo pipefail
+CSL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LAUNCHER="${CSL_LAUNCHER:-$CSL_DIR/launch-claude-agent.sh}"
+
+if [ "$#" -gt 0 ]; then exec "$LAUNCHER" "$@"; fi
+
+# shellcheck source=/dev/null
+. "$CSL_DIR/../config/config-lib.sh"
+la_load_config || exit 1
+
+echo "Local agents — pick a model to launch (config: ${LA_CONFIG_SOURCE}):"
+i=1; for a in "${LA_ALIASES[@]}"; do
+  printf "  %d) %-26s serve=%s effort=%s thinking=%s\n" "$i" "$a" "${LA_SERVE[$a]}" "${LA_EFFORT[$a]}" "${LA_THINK[$a]}"
+  i=$((i+1))
+done
+printf "Selection [1]: "; read -r choice; choice="${choice:-1}"
+if ! [[ "$choice" =~ ^[0-9]+$ ]] || [ "$choice" -lt 1 ] || [ "$choice" -gt "${#LA_ALIASES[@]}" ]; then
+  echo "Invalid selection."; exit 1
+fi
+exec "$LAUNCHER" "${LA_ALIASES[$((choice-1))]}"

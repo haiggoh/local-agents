@@ -1,0 +1,187 @@
+#!/usr/bin/env python3
+r"""
+git-local-review — send a git diff to a LOCAL OpenAI-compatible model for an advisory
+code review, with zero gateway/budget cost. Merge A (2026-07-27), adapted from the research
+draft's headless review idea but hardened per the independent review's checklist.
+
+WHY: get a fast, free second opinion on staged/unstaged changes without spinning up a full
+Claude Code loop. Advisory by default — it never blocks a commit unless you pass --strict.
+
+Reviewer discovery (first hit wins, override with --url/--port/--model):
+  1. --url / --port if given
+  2. Devstral on :8080 (llama-server) — the cross-family adversarial reviewer, preferred
+  3. scan ports 8000..8010 for any live vllm-mlx /v1/models and use the first
+
+Hardening (all from the review checklist):
+  - discovers the actual port AND model id from /v1/models (never assumes port 8000 / a name)
+  - connection + read timeouts on every HTTP call
+  - handles malformed JSON / HTTP errors / no-endpoint distinctly from "review passed"
+  - excludes binary files (via --numstat) and caps very large diffs (--max-chars, default 60k)
+  - does NOT write the diff to any persistent log (stdout only) — diffs may be sensitive
+  - strict verdict parse: only a line matching ^VERDICT:\s*(PASS|FAIL|CONCERNS) counts;
+    the bare token "PASS" occurring elsewhere in prose is NOT accepted
+  - exit codes:  0 = review ran, VERDICT PASS
+                 2 = review ran, VERDICT FAIL/CONCERNS  (only blocks if --strict)
+                 3 = review UNAVAILABLE (no endpoint / HTTP / malformed) — never mistaken for pass
+
+Usage:
+  git-local-review                 # review staged diff (git diff --staged)
+  git-local-review --unstaged      # review working-tree diff (git diff)
+  git-local-review --range A..B    # review an arbitrary revision range
+  git-local-review --url http://localhost:8080/v1   # force a reviewer endpoint
+  git-local-review --strict        # exit nonzero on FAIL/CONCERNS (for a pre-push hook)
+"""
+import sys, os, re, json, argparse, subprocess, urllib.request, urllib.error
+
+def eprint(*a): print(*a, file=sys.stderr)
+
+def http_json(url, payload=None, timeout=8):
+    """GET (payload=None) or POST JSON. Returns parsed dict, or raises."""
+    data = None
+    headers = {"Content-Type": "application/json"}
+    if payload is not None:
+        data = json.dumps(payload).encode()
+    req = urllib.request.Request(url, data=data, headers=headers,
+                                 method="POST" if payload is not None else "GET")
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read().decode())
+
+def probe_models(base):
+    """Return (base, model_id) if base/models answers with at least one model, else None."""
+    try:
+        j = http_json(base.rstrip("/") + "/models", timeout=3)
+        data = j.get("data") or []
+        if data and isinstance(data, list):
+            return base.rstrip("/"), data[0].get("id")
+    except Exception:
+        return None
+    return None
+
+def discover_reviewer(args):
+    # 1. explicit override
+    if args.url:
+        got = probe_models(args.url)
+        if got: return got
+        eprint(f"⚠️  --url {args.url} did not answer /models"); return None
+    if args.port:
+        got = probe_models(f"http://localhost:{args.port}/v1")
+        if got: return got
+        eprint(f"⚠️  port {args.port} did not answer /models"); return None
+    # 2. Devstral on 8080 (preferred cross-family reviewer)
+    got = probe_models("http://localhost:8080/v1")
+    if got: return got
+    # 3. scan the vllm-mlx port pool
+    for p in range(8000, 8011):
+        got = probe_models(f"http://localhost:{p}/v1")
+        if got: return got
+    return None
+
+def get_diff(args):
+    if args.range:
+        cmd_num = ["git", "diff", "--numstat", args.range]
+        cmd_txt = ["git", "diff", args.range]
+    elif args.unstaged:
+        cmd_num = ["git", "diff", "--numstat"]
+        cmd_txt = ["git", "diff"]
+    else:
+        cmd_num = ["git", "diff", "--numstat", "--staged"]
+        cmd_txt = ["git", "diff", "--staged"]
+    try:
+        numstat = subprocess.run(cmd_num, capture_output=True, text=True, check=True).stdout
+    except subprocess.CalledProcessError as e:
+        eprint("❌ git diff failed:", e.stderr.strip()); sys.exit(3)
+    except FileNotFoundError:
+        eprint("❌ git not found on PATH"); sys.exit(3)
+    # binary files show as "-\t-\tpath" in numstat
+    binaries = [ln.split("\t", 2)[2] for ln in numstat.splitlines()
+                if ln.startswith("-\t-\t")]
+    # exclude binaries from the text diff via pathspec exclusions
+    exclude = [f":(exclude){b}" for b in binaries]
+    full_txt_cmd = cmd_txt + (["--"] + exclude if exclude else [])
+    diff = subprocess.run(full_txt_cmd, capture_output=True, text=True).stdout
+    return diff, binaries
+
+REVIEW_SYS = (
+    "You are a meticulous senior code reviewer. Review the supplied git diff for correctness "
+    "bugs, security issues, resource/edge-case handling, and obviously missing tests. Be concise: "
+    "list only real, actionable findings (file + what + why), most severe first. Do not restate the "
+    "diff. After your findings, output EXACTLY ONE final line of the form:\n"
+    "VERDICT: PASS      (no blocking issues)\n"
+    "VERDICT: CONCERNS  (non-blocking issues worth a look)\n"
+    "VERDICT: FAIL      (a real bug/security issue that should block)\n"
+    "The VERDICT line must be the last line and must start at column 0."
+)
+
+VERDICT_RE = re.compile(r"^VERDICT:\s*(PASS|FAIL|CONCERNS)\b", re.MULTILINE)
+
+def main():
+    ap = argparse.ArgumentParser(add_help=True, description="Local advisory code review of a git diff.")
+    g = ap.add_mutually_exclusive_group()
+    g.add_argument("--unstaged", action="store_true", help="review working-tree diff (git diff)")
+    g.add_argument("--range", help="review an arbitrary range, e.g. main..HEAD")
+    ap.add_argument("--url", help="reviewer base URL incl. /v1 (e.g. http://localhost:8080/v1)")
+    ap.add_argument("--port", type=int, help="reviewer localhost port (implies /v1)")
+    ap.add_argument("--model", help="override model id (default: first from /v1/models)")
+    ap.add_argument("--max-chars", type=int, default=60000, help="cap diff chars sent (default 60000)")
+    ap.add_argument("--max-tokens", type=int, default=1500, help="reviewer output budget")
+    ap.add_argument("--strict", action="store_true", help="exit nonzero on FAIL/CONCERNS")
+    args = ap.parse_args()
+
+    diff, binaries = get_diff(args)
+    if binaries:
+        eprint(f"ℹ️  excluded {len(binaries)} binary file(s): {', '.join(binaries)}")
+    if not diff.strip():
+        eprint("ℹ️  no textual diff to review."); sys.exit(0)
+
+    truncated = False
+    if len(diff) > args.max_chars:
+        diff = diff[:args.max_chars]
+        truncated = True
+        eprint(f"⚠️  diff truncated to {args.max_chars} chars for review (pass --max-chars to raise).")
+
+    found = discover_reviewer(args)
+    if not found:
+        eprint("❌ review UNAVAILABLE: no local reviewer answered on :8080 or ports 8000-8010.")
+        eprint("   (start one, e.g. local-llm-hotswap.sh qwen-3.6-operator, or pass --url) ")
+        sys.exit(3)
+    base, model_id = found
+    model = args.model or model_id
+    eprint(f"🔎 reviewing via {base}  model={model}")
+
+    user_msg = ("Review this diff" + (" (TRUNCATED)" if truncated else "") + ":\n\n" + diff)
+    payload = {
+        "model": model,
+        "messages": [{"role": "system", "content": REVIEW_SYS},
+                     {"role": "user", "content": user_msg}],
+        "max_tokens": args.max_tokens,
+        "temperature": 0.1,
+        "stream": False,
+    }
+    try:
+        resp = http_json(base + "/chat/completions", payload, timeout=180)
+    except urllib.error.HTTPError as e:
+        eprint(f"❌ review UNAVAILABLE: HTTP {e.code} from reviewer."); sys.exit(3)
+    except (urllib.error.URLError, TimeoutError) as e:
+        eprint(f"❌ review UNAVAILABLE: {e}"); sys.exit(3)
+    except json.JSONDecodeError:
+        eprint("❌ review UNAVAILABLE: reviewer returned non-JSON."); sys.exit(3)
+
+    try:
+        content = resp["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError):
+        eprint("❌ review UNAVAILABLE: unexpected response shape."); sys.exit(3)
+
+    print(content.rstrip())
+    m = VERDICT_RE.search(content)
+    if not m:
+        eprint("\n⚠️  no parseable VERDICT line — treating as UNAVAILABLE (not a pass).")
+        sys.exit(3)
+    verdict = m.group(1)
+    eprint(f"\n=> VERDICT: {verdict}")
+    if verdict == "PASS":
+        sys.exit(0)
+    # FAIL or CONCERNS
+    sys.exit(2 if args.strict else 0)
+
+if __name__ == "__main__":
+    main()
