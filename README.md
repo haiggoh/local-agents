@@ -50,8 +50,11 @@ approach suppressed them).
 - **`install/`** — `install-backend.sh` (venv + vllm-mlx + fork patches), `download-models.sh`,
   and `vllm-mlx-local-fork-patches.patch`.
 - **`bin/` diagnostics** — `tournament-dispatch.py`, `cancellation-matrix.py`,
-  `check-tool-roundtrip.py`, `auto-mode-probe.sh`, `librarian-dispatch.py`, `thinking-log.py`,
-  `git-local-review`.
+  `check-tool-roundtrip.py`, `direct-route-acceptance.py`, `auto-mode-probe.sh`,
+  `librarian-dispatch.py`, `thinking-log.py`, `git-local-review`.
+- **`bin/new-local-window.sh`** — open a full local session in a new, independent Terminal window (macOS).
+- **skills** — `local-agents` (drive local sessions & dispatch) and `offload-to-local` (a habit-forming
+  trigger to delegate bulk/mechanical work to a local model to save cost — the plugin's main idea).
 
 ## Install
 
