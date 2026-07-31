@@ -1,25 +1,43 @@
 # local-agents
 
-**Run Claude Code on local MLX models (Apple Silicon) as an additive overlay.**
+**Save cost (and work offline/privately) by offloading Claude Code work to free local MLX models on Apple Silicon.**
 
-Route Claude Code directly to a local [`vllm-mlx`](https://github.com/waybarrios/vllm-mlx) server
-so you can work offline or without spending cloud budget — while keeping native transcripts,
-`history.jsonl`, and normal Claude Code behavior. It's an **overlay**: your private paths, keys, and
-model layout live in a gitignored `config.local.sh`, and your `~/.claude/settings.json` is never
-touched. Works with plain `claude` and with wrapped launchers.
+The main use: from your normal Claude Code session — running a capable cloud model like Opus or
+Sonnet, whether you connect to Anthropic directly or through a gateway — **dispatch delegatable
+sub-tasks to a free local model**. You keep your cloud model driving the hard reasoning and hand
+off bulk/mechanical work (searches, summaries, bounded transforms, first-pass reviews) to local
+compute — saving cost without changing your workflow or your main model.
+
+It's an **additive overlay**: your private paths, keys, and model layout live in a gitignored
+`config.local.sh`, and your `~/.claude/settings.json` is never touched. Works with plain `claude`
+and with wrapped launchers.
 
 > Requires an Apple-Silicon Mac with enough unified memory for your models (the reference stack
 > targets a 128 GB M4 Max). This is power-user tooling, not a one-click app.
 
 ---
 
-## Why
+## Two ways to use it
+
+**1. Offload sub-tasks from your cloud session — recommended, what most people want.**
+Keep driving with your cloud model (Opus/Sonnet). Dispatch bounded sub-tasks to a local model via
+`curl` / `librarian-dispatch.py` / `hotswap` — fast (sub-second to seconds), free, private. Nothing
+about your main session changes; you're just sending the delegatable parts to local compute. This
+saves cost for **anyone**, whether or not you have a spending cap.
+
+**2. Full local mode — niche, for cost/budget-constrained stretches.**
+Run an *entire* Claude Code session on a local model (served under a spoofed Claude id so the client
+accepts it). Useful mainly when you want zero cloud cost for a block of work, or you're offline.
+Trade-off: interactive turns on a local model are slower than a cloud model, so most users won't
+want this as their default — reach for it when the cost saving is worth the latency.
+
+## How it works
 
 Claude Code talks to an Anthropic-compatible endpoint. `vllm-mlx` exposes one (`/v1/messages`) and
-can serve a local MLX model under a spoofed Claude model id (an org-allowlist workaround). Point
-`ANTHROPIC_BASE_URL` at it and Claude Code runs on your local model — free, private, offline-capable.
-Earlier proxy/relay approaches broke native transcript + history persistence; **direct routing
-restores them** (the proxy in the request path was the suppressor).
+serves a local MLX model. For dispatch (way 1) you just `curl` that endpoint. For full local mode
+(way 2) the model is served under a spoofed Claude model id and `ANTHROPIC_BASE_URL` points Claude
+Code at it; direct routing keeps native transcripts + `history.jsonl` working (an earlier proxy
+approach suppressed them).
 
 ## What's in the box
 
@@ -62,21 +80,27 @@ la_register my-operator  Qwen3.6-27B-UD-MLX-4bit  vllm  qwen  ""  false  claude-
 
 ## Usage
 
-```bash
-./bin/launch-claude-agent.sh my-operator          # interactive local session
-./bin/launch-claude-agent.sh deepseek-r1-architect max   # optional effort override
-./bin/csl                                          # pick from a menu
-```
-
-**Prefer dispatch for focused work.** A full interactive turn on a local 27B is minutes/turn (large
-system prompt + many tools × local prefill speed). For a bounded task, dispatch a small prompt
-directly — sub-second to seconds:
+**Way 1 — dispatch a sub-task to a local model (the main use).** Free, fast (sub-second to seconds),
+private. Do this from anywhere, including inside your normal cloud Claude Code session:
 
 ```bash
 PORT=$(./bin/local-llm-hotswap.sh my-operator | grep -o 'SUCCESS_PORT=[0-9]*' | cut -d= -f2)
 curl -s http://localhost:$PORT/v1/chat/completions -H 'Content-Type: application/json' \
-  -d '{"model":"claude-opus-4-8","messages":[{"role":"user","content":"..."}],"max_tokens":512}'
+  -d '{"model":"my-operator","messages":[{"role":"user","content":"..."}],"max_tokens":512}'
 ```
+For long generations use `./bin/librarian-dispatch.py` (SSE + stall watchdog).
+
+**Way 2 — full local session** (niche; slower per turn):
+```bash
+./bin/launch-claude-agent.sh my-operator                  # interactive local session
+./bin/launch-claude-agent.sh deepseek-r1-architect max    # optional effort override
+./bin/csl                                                 # pick from a menu of presets
+./bin/new-local-window.sh my-operator                     # open it in a NEW, independent Terminal window (macOS)
+```
+
+**Convenience (optional):** `./install/setup-shortcuts.sh` puts `csl` on your PATH and adds
+`local-*` shell aliases (`local-operator`, `local-menu`, `local-window`, …). Idempotent; edits only
+a fenced block in your shell rc.
 
 ## The fork patches (required for direct routing)
 
