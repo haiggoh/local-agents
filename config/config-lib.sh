@@ -50,11 +50,25 @@ la_register() {
   LA_ROLES[$alias]="${9:-}"; LA_REPO[$alias]="${10:-}"; LA_SIZE[$alias]="${11:-}"
 }
 
-# --- optional selector PRESETS -----------------------------------------------
-# Convenience launch options for the csl menu: (label, registered alias, effort). Presets
-# REUSE the aliased model's server — effort is a launcher flag, not a new model — so listing
-# fast/high/xhigh variants of one model does NOT spin up duplicate servers. If no presets are
-# registered, csl falls back to one entry per registered model at its default effort.
+# --- role bindings: role × (model, effort) — SINGLE SOURCE OF TRUTH for roles ----
+# la_role <role> <alias> <effort> [mode:dispatch|session|both]
+# Binds a ROLE to a specific model AT a specific effort/thinking depth. This unifies the two axes
+# that define a role: the SAME weights fill different roles at different efforts (fast operator vs
+# deep reasoner). BOTH the resolver (la-roles.sh) and the csl launch menu are generated from these
+# bindings, so a role is never defined twice. Several bindings for one role = your A/B choice; the
+# same alias at two efforts = an effort-split (e.g. operator@medium and reasoner@xhigh on one model).
+#   mode: where the binding is offered — dispatch (curl only), session (interactive launch only), or
+#         both (default). A dispatch-only model (no structured tool_calls) should be `dispatch`.
+# This is the preferred source. If NO la_role lines are declared, bindings are auto-derived from the
+# `roles` tags on la_register at each model's default effort (see la_finalize_roles) — so older
+# configs keep working. The legacy `la_preset` list still feeds the csl menu as a fallback.
+LA_ROLE_BINDINGS=()   # "role|alias|effort|mode" strings, in declaration order
+la_role() { LA_ROLE_BINDINGS+=("$1|$2|${3:-}|${4:-both}"); }
+
+# --- legacy selector PRESETS (fallback for the csl menu if no la_role bindings) --------------
+# (label, registered alias, effort). Presets REUSE the aliased model's server — effort is a launcher
+# flag, not a new model. Superseded by la_role (which drives BOTH the menu and the resolver); kept
+# working for back-compat. If neither la_role nor la_preset is set, csl lists one entry per model.
 LA_PRESET_LABEL=(); LA_PRESET_ALIAS=(); LA_PRESET_EFFORT=()
 la_preset() { LA_PRESET_LABEL+=("$1"); LA_PRESET_ALIAS+=("$2"); LA_PRESET_EFFORT+=("$3"); }
 
@@ -84,6 +98,58 @@ la_load_config() {
   # Optional per-machine extras a user may want the agent prompt to know about (all optional):
   : "${LA_MEMORY_DIR:=}"          # absolute path to your auto-memory dir, if you want the agent told
   : "${LA_COUNCIL_NOTE:=}"        # optional extra line appended to the agent prompt (e.g. a council rule)
+  la_finalize_roles
+}
+
+# la_finalize_roles -> if the config declared NO explicit la_role bindings, derive them from the
+# `roles` tags on la_register (each tagged role bound to that alias at its default effort, mode=both).
+# Keeps pre-binding configs working; a no-op when explicit la_role lines exist.
+la_finalize_roles() {
+  [ "${#LA_ROLE_BINDINGS[@]}" -gt 0 ] && return 0
+  local a rest r
+  for a in "${LA_ALIASES[@]}"; do
+    rest="${LA_ROLES[$a]:-}"; rest="${rest// /}"
+    [ -z "$rest" ] && continue
+    IFS=',' read -ra rs <<< "$rest"
+    for r in "${rs[@]}"; do [ -n "$r" ] && la_role "$r" "$a" "${LA_EFFORT[$a]:-}" both; done
+  done
+}
+
+# la_role_bindings_for <role> -> prints "alias|effort|mode" for each binding of <role>.
+la_role_bindings_for() {
+  local want="$1" b role alias effort mode
+  for b in "${LA_ROLE_BINDINGS[@]}"; do
+    IFS='|' read -r role alias effort mode <<< "$b"
+    [ "$role" = "$want" ] && printf '%s|%s|%s\n' "$alias" "$effort" "$mode"
+  done
+}
+
+# la_roles_for_alias <alias> -> comma-separated roles bound to this alias (from bindings), else "".
+# Lets consumers (e.g. the installer) show a model's roles from the single binding source, so the
+# `roles` tag on la_register can stay empty/legacy.
+la_roles_for_alias() {
+  local want="$1" b role alias _ out=""
+  for b in "${LA_ROLE_BINDINGS[@]}"; do
+    IFS='|' read -r role alias _ <<< "$b"
+    [ "$alias" = "$want" ] || continue
+    case ",$out," in *",$role,"*) ;; *) out="${out:+$out,}$role";; esac
+  done
+  echo "$out"
+}
+
+# la_bound_roles -> prints the distinct roles that have bindings, canonical order first then extras.
+la_bound_roles() {
+  local b role _ seen=" " r
+  for r in $LA_CANONICAL_ROLES; do
+    for b in "${LA_ROLE_BINDINGS[@]}"; do
+      IFS='|' read -r role _ <<< "$b"
+      [ "$role" = "$r" ] && { echo "$r"; seen="$seen$r "; break; }
+    done
+  done
+  for b in "${LA_ROLE_BINDINGS[@]}"; do
+    IFS='|' read -r role _ <<< "$b"
+    case "$seen" in *" $role "*) ;; *) echo "$role"; seen="$seen$role ";; esac
+  done
 }
 
 # la_lookup <alias> -> sets LA_CUR_* for the matched model, returns 1 if unknown.

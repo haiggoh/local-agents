@@ -50,7 +50,8 @@ for a in "${LA_ALIASES[@]}"; do
   fi
   SEEN_SUBDIR[$sub]=${#CAT_SUBDIR[@]}
   CAT_SUBDIR+=("$sub"); CAT_REPO+=("$repo"); CAT_SIZE+=("${LA_SIZE[$a]:-?}")
-  CAT_LABEL+=("$a [${LA_ROLES[$a]:-untagged}]")
+  roles="$(la_roles_for_alias "$a")"; [ -z "$roles" ] && roles="${LA_ROLES[$a]:-untagged}"
+  CAT_LABEL+=("$a [${roles}]")
 done
 
 n=${#CAT_SUBDIR[@]}

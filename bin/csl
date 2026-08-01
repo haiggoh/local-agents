@@ -18,7 +18,23 @@ if [ "$#" -gt 0 ]; then exec "$LAUNCHER" "$@"; fi
 la_load_config || exit 1
 
 echo "Local agents — pick a session to launch (config: ${LA_CONFIG_SOURCE}):"
-if [ "${#LA_PRESET_LABEL[@]}" -gt 0 ]; then
+# Preferred: build the menu from la_role bindings (the single source of truth shared with
+# la-roles.sh), so the launch menu and the resolver never drift. Only session-capable bindings
+# (mode session|both) are launchable interactively — dispatch-only models are curl-only.
+MENU_LABEL=(); MENU_ALIAS=(); MENU_EFFORT=()
+for b in "${LA_ROLE_BINDINGS[@]}"; do
+  IFS='|' read -r role alias effort mode <<< "$b"
+  case "${mode:-both}" in session|both) ;; *) continue;; esac
+  MENU_LABEL+=("$role — $alias (${effort:-default})"); MENU_ALIAS+=("$alias"); MENU_EFFORT+=("$effort")
+done
+if [ "${#MENU_ALIAS[@]}" -gt 0 ]; then
+  n=${#MENU_ALIAS[@]}
+  for ((i=0; i<n; i++)); do printf "  %d) %s\n" "$((i+1))" "${MENU_LABEL[$i]}"; done
+  printf "Selection [1]: "; read -r c; c="${c:-1}"
+  if ! [[ "$c" =~ ^[0-9]+$ ]] || [ "$c" -lt 1 ] || [ "$c" -gt "$n" ]; then echo "Invalid selection."; exit 1; fi
+  a="${MENU_ALIAS[$((c-1))]}"; e="${MENU_EFFORT[$((c-1))]}"
+  if [ -n "$e" ]; then exec "$LAUNCHER" "$a" "$e"; else exec "$LAUNCHER" "$a"; fi
+elif [ "${#LA_PRESET_LABEL[@]}" -gt 0 ]; then
   # preset menu (label + effort); each reuses its model's server
   n=${#LA_PRESET_LABEL[@]}
   for ((i=0; i<n; i++)); do

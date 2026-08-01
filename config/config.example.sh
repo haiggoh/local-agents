@@ -62,18 +62,23 @@ LA_COUNCIL_NOTE=""
 # The examples below are the maintainer's mid-2026 M4-Max stack — REPLACE with your models. Note
 # operator + thinking share ONE download (same subdir/repo, different launch flags) — the installer
 # dedupes by subdir, so that's a single ~16 GB fetch, not two.
-la_register qwen-3.6-operator      Qwen3.6-27B-UD-MLX-4bit            vllm   qwen  ""          false claude-opus-4-8           high  operator          unsloth/Qwen3.6-27B-UD-MLX-4bit             16
-la_register qwen-3.6-thinking      Qwen3.6-27B-UD-MLX-4bit            vllm   qwen  qwen3       true  claude-opus-4-8           high  reasoner          unsloth/Qwen3.6-27B-UD-MLX-4bit             16
-la_register deepseek-r1-architect  DeepSeek-R1-Distill-Qwen-32B-4bit  vllm   qwen  deepseek_r1 true  claude-opus-4-8           max   validator,reasoner mlx-community/DeepSeek-R1-Distill-Qwen-32B-4bit 18
-la_register llama-scout            Llama-4-Scout-17B-16E-Instruct-4bit mlx_lm llama ""         false claude-haiku-4-5-20251001 low   utility           mlx-community/Llama-4-Scout-17B-16E-Instruct-4bit 60
+# NOTE: the `roles` field (arg 9) is left "" here — roles are defined ONCE below via `la_role`
+# (the single source that drives both the resolver and the csl menu). The `roles` tag still works as
+# a legacy shortcut (auto-promoted to bindings if you declare no la_role lines), but don't set both.
+la_register qwen-3.6-operator      Qwen3.6-27B-UD-MLX-4bit            vllm   qwen  ""          false claude-opus-4-8           high  ""  unsloth/Qwen3.6-27B-UD-MLX-4bit                   16
+la_register qwen-3.6-thinking      Qwen3.6-27B-UD-MLX-4bit            vllm   qwen  qwen3       true  claude-opus-4-8           high  ""  unsloth/Qwen3.6-27B-UD-MLX-4bit                   16
+la_register deepseek-r1-architect  DeepSeek-R1-Distill-Qwen-32B-4bit  vllm   qwen  deepseek_r1 true  claude-opus-4-8           max   ""  mlx-community/DeepSeek-R1-Distill-Qwen-32B-4bit    18
+la_register llama-scout            Llama-4-Scout-17B-16E-Instruct-4bit mlx_lm llama ""         false claude-haiku-4-5-20251001 low   ""  mlx-community/Llama-4-Scout-17B-16E-Instruct-4bit 60
 
-# --- selector presets (the csl menu) -----------------------------------------
-# Convenience launch options: (label, registered alias, effort). Each REUSES the aliased model's
-# server — effort is a launcher flag, not a new model — so fast/high/xhigh variants of one model
-# don't spin up duplicate servers. Comment all out to fall back to one entry per registered model.
-la_preset "operator — fast (medium)"      qwen-3.6-operator     medium
-la_preset "operator — default (high)"     qwen-3.6-operator     high
-la_preset "operator — deep (xhigh)"       qwen-3.6-operator     xhigh
-la_preset "thinking — reasoning"          qwen-3.6-thinking     high
-la_preset "architect — validator (max)"   deepseek-r1-architect max
-la_preset "scout — utility (dispatch)"    llama-scout           low
+# --- role bindings (SINGLE SOURCE OF TRUTH for roles; drives la-roles.sh AND the csl menu) -----
+# la_role <role> <alias> <effort> [mode:dispatch|session|both]. The SAME weights fill different roles
+# at different efforts (an effort-split); several bindings for one role = your A/B choice. mode:
+# dispatch = curl-only (kept out of the interactive launch menu); session/both = launchable via csl.
+# Effort variants REUSE the aliased model's server (effort is a launcher flag, not a new model).
+la_role operator  qwen-3.6-operator     medium both      # fast operator — the workhorse default
+la_role operator  qwen-3.6-operator     high   both      # deeper operator (same server, higher effort)
+la_role operator  qwen-3.6-operator     xhigh  both      # deepest operator
+la_role reasoner  qwen-3.6-thinking     high   both      # thinking flavor (same weights, thinking on)
+la_role reasoner  deepseek-r1-architect max    both      # A/B reasoner — strongest local reasoner
+la_role validator deepseek-r1-architect max    dispatch  # independent review — dispatch (no tool_calls)
+la_role utility   llama-scout           low    dispatch  # cheap classification — dispatch-only

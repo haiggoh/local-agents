@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# la-roles.sh — the disk-aware role resolver: show which of YOUR on-disk models fills each role.
+# la-roles.sh — the disk-aware role resolver: show which of YOUR on-disk models (and at what effort)
+# fills each role. This is the single command the offload rules point at.
 #
-# This is the single command the offload rules point at. It reads the registry (config.local.sh,
-# else config.example.sh) and, for every role, lists the registered models tagged with it, marking
-# each ● on-disk (usable now) or ○ not downloaded. The roster can change freely — the rules refer
-# to ROLES, this resolves roles → actual available models at call time.
+# Roles are defined once, as la_role bindings (role × model × effort) in the config — the SAME source
+# the csl launch menu is generated from, so the two never drift. For each role this lists its
+# bindings, marking ● usable now (weights on disk) or ○ not downloaded, with the effort and mode.
 #
 # Usage: la-roles.sh            # human table
 #        la-roles.sh <role>     # print just the ON-DISK alias(es) for one role (empty if none)
@@ -17,46 +17,40 @@ BIN_DIR="$(cd -P "$(dirname "$_s")" && pwd)"
 . "$BIN_DIR/../config/config-lib.sh"
 la_load_config || exit 1
 
-# Machine-readable single-role query: emit only on-disk aliases (for scripts / quick lookup).
+# Machine-readable single-role query: emit only on-disk aliases (deduped) for scripts / quick lookup.
 if [ "$#" -ge 1 ]; then
-  want="$1"
-  while IFS= read -r a; do
-    [ -n "$a" ] && la_on_disk "$a" && echo "$a"
-  done < <(la_models_for_role "$want")
+  want="$1"; seen=" "
+  while IFS='|' read -r alias effort mode; do
+    [ -n "$alias" ] || continue
+    case "$seen" in *" $alias "*) continue;; esac
+    la_on_disk "$alias" && { echo "$alias"; seen="$seen$alias "; }
+  done < <(la_role_bindings_for "$want")
   exit 0
 fi
 
-# Human report. Enumerate the canonical roles ALWAYS (so an unfilled role is visibly unfilled),
-# then any extra role tags the config introduced.
-extra_roles() {
-  local a r rest seen=" "
-  for a in "${LA_ALIASES[@]}"; do
-    rest="${LA_ROLES[$a]:-}"; rest="${rest// /}"
-    IFS=',' read -ra rs <<< "$rest"
-    for r in "${rs[@]}"; do
-      [ -z "$r" ] && continue
-      case " $LA_CANONICAL_ROLES " in *" $r "*) continue;; esac
-      case "$seen" in *" $r "*) continue;; esac
-      seen="$seen$r "; echo "$r"
-    done
-  done
+# Human report. Enumerate the canonical roles ALWAYS (so an unfilled role is visibly unfilled), plus
+# any extra roles that have bindings.
+roles_to_show() {
+  local r seen=" "
+  for r in $LA_CANONICAL_ROLES; do echo "$r"; seen="$seen$r "; done
+  while IFS= read -r r; do case "$seen" in *" $r "*) ;; *) echo "$r";; esac; done < <(la_bound_roles)
 }
 
 echo "Local roles (config: ${LA_CONFIG_SOURCE}; models dir: ${LA_MODELS_DIR}):"
-echo "  ● = on disk / usable now   ○ = registered but not downloaded"
-for role in $LA_CANONICAL_ROLES $(extra_roles); do
+echo "  ● = on disk / usable now   ○ = registered but not downloaded   [mode] = dispatch/session/both"
+while IFS= read -r role; do
   printf "\n[%s]\n" "$role"
   any=0
-  while IFS= read -r a; do
-    [ -z "$a" ] && continue
+  while IFS='|' read -r alias effort mode; do
+    [ -n "$alias" ] || continue
     any=1
-    if la_on_disk "$a"; then mark="●"; else mark="○"; fi
-    size="${LA_SIZE[$a]:-}"; [ -n "$size" ] && size=" (~${size} GB)"
-    printf "  %s %-24s serve=%-6s effort=%-6s%s\n" "$mark" "$a" "${LA_SERVE[$a]}" "${LA_EFFORT[$a]}" "$size"
-  done < <(la_models_for_role "$role")
-  [ "$any" -eq 0 ] && echo "  (no model fills this role — keep such work on the cloud model, or download one)"
-done
+    if la_on_disk "$alias"; then mark="●"; else mark="○"; fi
+    size="${LA_SIZE[$alias]:-}"; [ -n "$size" ] && size=" (~${size} GB)"
+    printf "  %s %-24s effort=%-6s [%s]%s\n" "$mark" "$alias" "${effort:-?}" "${mode:-both}" "$size"
+  done < <(la_role_bindings_for "$role")
+  [ "$any" -eq 0 ] && echo "  (no model bound to this role — keep such work on the cloud model, or bind/download one)"
+done < <(roles_to_show)
 
 echo
-echo "Multiple ● under one role = your A/B choice. Route by role, not by a hardcoded name."
-echo "Download more: install/download-models.sh (interactive)."
+echo "Same alias under two roles/efforts = the (model × effort) split. Several ● in one role = A/B."
+echo "Route by role, not by a hardcoded name. Download more: install/download-models.sh (interactive)."

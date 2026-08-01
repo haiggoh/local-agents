@@ -23,9 +23,16 @@ bulk/mechanical steps — and *always* under a budget constraint — annotate **
 - `cloud:<reason>` — kept on the cloud model, with the reason named.
 
 **Default to `operator`.** Under a budget constraint the burden flips: a step is `local:operator`
-unless you can name why it must be `cloud:` (frontier reasoning, security-critical, final review,
-or it needs live tools the local model can't drive). You justify keeping work on cloud, not
-offloading it. Absent budget pressure the annotation is optional — but the upfront pass costs nothing.
+unless you can name why it's `cloud:`. Valid `cloud:` reasons are of two kinds:
+- **quality/capability** — frontier reasoning, security-critical, final review, or it needs live
+  tools the local model can't drive; and
+- **cost-benefit** — the work is small or one-off and the spin-up/briefing overhead would exceed the
+  saving (`cloud:not worth offloading`). This is a first-class, legitimate reason, not a cop-out.
+
+**Offload is the default, not a mandate.** The point is to stop *reflexively* doing bulk/mechanical
+work on the paid model — not to force a local hop onto trivia where it costs more than it saves. When
+in doubt on a real chunk of work, offload; on a one-liner, just do it. Absent budget pressure the
+whole annotation is optional — but the upfront pass costs nothing.
 
 ## Route by role — operator by default, escalate when needed
 `operator` is the **broad default / catch-all**: any delegatable chunk goes here unless it clearly
