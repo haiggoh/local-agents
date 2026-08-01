@@ -32,10 +32,13 @@ LA_MEMORY_DIR=""
 # personal "council" review rule. Leave empty to omit.
 LA_COUNCIL_NOTE=""
 
-# --- model registry ----------------------------------------------------------
-# Define the models YOU have on disk. One la_register line per model:
+# --- model registry (SINGLE SOURCE OF TRUTH) ---------------------------------
+# This registry is the one place that defines the roster. It drives launching, the by-ROLE routing
+# the offload rules use, the disk-aware role resolver (`bin/la-roles.sh`), AND the interactive
+# installer (`install/download-models.sh` reads hf_repo/size from here). Change models HERE only.
+# One la_register line per model:
 #
-#   la_register <alias> <subdir> <serve> <tool_parser> <reasoning_parser> <thinking> <spoof_id> <effort>
+#   la_register <alias> <subdir> <serve> <tool_parser> <reasoning_parser> <thinking> <spoof_id> <effort> [roles] [hf_repo] [size_gb]
 #
 #   alias            what a session/dispatch requests (e.g. `launch ... my-operator`)
 #   subdir           directory name under LA_MODELS_DIR
@@ -47,12 +50,22 @@ LA_COUNCIL_NOTE=""
 #   spoof_id         Claude model id Claude Code sends (org-allowlist workaround); vllm serves the
 #                    model under BOTH this id AND the alias. Usually claude-opus-4-8 / claude-haiku-4-5-20251001
 #   effort           Claude Code --effort: low|medium|high|xhigh|max
+#   roles            OPTIONAL comma-separated role tags — operator|reasoner|validator|utility (and
+#                    any extras). This is what the rules route on. A role may be filled by several
+#                    models (your A/B choice); leaving a role unfilled is fine (that work stays on
+#                    cloud). OMIT for an untagged model (still launchable, just not offered by role).
+#   hf_repo          OPTIONAL Hugging Face repo id — lets the interactive installer download it.
+#                    OMIT to manage the weights yourself.
+#   size_gb          OPTIONAL approx download size (installer display / disk consent). OMIT if unknown.
 #
-# The examples below are the maintainer's mid-2026 M4-Max stack — REPLACE with your models.
-la_register qwen-3.6-operator      Qwen3.6-27B-UD-MLX-4bit            vllm   qwen  ""          false claude-opus-4-8           high
-la_register qwen-3.6-thinking      Qwen3.6-27B-UD-MLX-4bit            vllm   qwen  qwen3       true  claude-opus-4-8           high
-la_register deepseek-r1-architect  DeepSeek-R1-Distill-Qwen-32B-4bit  vllm   qwen  deepseek_r1 true  claude-opus-4-8           max
-la_register llama-scout            Llama-4-Scout-17B-16E-Instruct-4bit mlx_lm llama ""         false claude-haiku-4-5-20251001 low
+# Fields are positional: to set a later optional field, pass "" for any earlier one you're skipping.
+# The examples below are the maintainer's mid-2026 M4-Max stack — REPLACE with your models. Note
+# operator + thinking share ONE download (same subdir/repo, different launch flags) — the installer
+# dedupes by subdir, so that's a single ~16 GB fetch, not two.
+la_register qwen-3.6-operator      Qwen3.6-27B-UD-MLX-4bit            vllm   qwen  ""          false claude-opus-4-8           high  operator          unsloth/Qwen3.6-27B-UD-MLX-4bit             16
+la_register qwen-3.6-thinking      Qwen3.6-27B-UD-MLX-4bit            vllm   qwen  qwen3       true  claude-opus-4-8           high  reasoner          unsloth/Qwen3.6-27B-UD-MLX-4bit             16
+la_register deepseek-r1-architect  DeepSeek-R1-Distill-Qwen-32B-4bit  vllm   qwen  deepseek_r1 true  claude-opus-4-8           max   validator,reasoner mlx-community/DeepSeek-R1-Distill-Qwen-32B-4bit 18
+la_register llama-scout            Llama-4-Scout-17B-16E-Instruct-4bit mlx_lm llama ""         false claude-haiku-4-5-20251001 low   utility           mlx-community/Llama-4-Scout-17B-16E-Instruct-4bit 60
 
 # --- selector presets (the csl menu) -----------------------------------------
 # Convenience launch options: (label, registered alias, effort). Each REUSES the aliased model's

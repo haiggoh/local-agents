@@ -63,8 +63,12 @@ git clone https://github.com/haiggoh/local-agents && cd local-agents
 ./install/install-backend.sh                       # venv + vllm-mlx + apply fork patches
 cp config/config.example.sh config/config.local.sh # your private overlay (gitignored)
 $EDITOR config/config.local.sh                     # set model dir, ports, and your model registry
-./install/download-models.sh                       # edit its HF-repo map first, then fetch weights
+./install/download-models.sh                       # INTERACTIVE — pick which models to download
 ```
+
+You choose which weights to fetch — large models aren't the right fit for every machine, and a
+**partial roster is fine**: whatever you download fills the roles it's tagged with; the rest of the
+work stays on the cloud model.
 
 ## The overlay (public tooling, private config)
 
@@ -77,8 +81,27 @@ Nothing here modifies `~/.claude/settings.json` or any other plugin's config.
 Register your models like this (see `config.example.sh` for the full column reference):
 
 ```bash
-# alias | subdir | serve | tool_parser | reasoning_parser | thinking | spoof_id | effort
-la_register my-operator  Qwen3.6-27B-UD-MLX-4bit  vllm  qwen  ""  false  claude-opus-4-8  high
+# alias | subdir | serve | tool_parser | reasoning_parser | thinking | spoof_id | effort | [roles] | [hf_repo] | [size_gb]
+la_register my-operator  Qwen3.6-27B-UD-MLX-4bit  vllm  qwen  ""  false  claude-opus-4-8  high  operator  unsloth/Qwen3.6-27B-UD-MLX-4bit  16
+```
+
+The registry is the **single source of truth**: it drives launching, the interactive installer
+(`hf_repo`/`size_gb`), and role routing. The last three fields are optional and additive, so older
+8-field lines keep working.
+
+### Roles (routing without hardcoding)
+
+Tag each model with the role(s) it can fill — `operator` (bulk/mechanical/tool-driving), `reasoner`
+(reasoning first-pass), `validator` (independent review), `utility` (cheap classification). A role
+may be filled by several models (your A/B choice) or none (that work stays on cloud). The offload
+rules route by **role name**, never a model name, so your roster can change without touching any rule.
+
+Resolve roles → the models you actually have on disk:
+
+```bash
+./bin/la-roles.sh          # per-role table: ● on disk / usable now, ○ registered but not downloaded
+./bin/la-roles.sh operator # just the on-disk alias(es) for one role
+./bin/csl roles            # same, via the csl front-end
 ```
 
 ## Usage

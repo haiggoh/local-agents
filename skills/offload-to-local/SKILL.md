@@ -20,16 +20,26 @@ cost) the default flips: every delegatable stage goes local unless you can name 
 the cloud model. You justify keeping work on cloud, not offloading it. Absent any budget pressure this
 is optional — but the upfront scan still costs nothing.
 
-## Route by role — brief the right local model for the job
-Different local models fill different roles (aliases below are the maintainer's stack; yours come from
-`config.local.sh`). Match the stage to the role and brief it accordingly:
+## Route by role — resolve, then brief
+Match each delegatable stage to a **role**, then resolve which of *your* on-disk models fills it —
+**never hardcode a model name**, the roster changes. The registry (`config.local.sh`) is the single
+source of truth; this resolves it against what's actually downloaded:
+```bash
+<repo>/bin/la-roles.sh          # per-role table — ● on disk / usable now, ○ registered but not downloaded
+<repo>/bin/la-roles.sh <role>   # just the on-disk alias(es) for one role (empty = unfilled)
+# or `csl roles`
+```
 
-| Delegatable stage | Local role → alias | How to brief it |
+| Delegatable stage | Role | How to brief it |
 |---|---|---|
-| Read/summarize many files, log/diff/output analysis, wide grep-and-summarize, mechanical transforms, format conversion, repetitive spec-driven edits, boilerplate/scaffold, draft prose | **operator** → `qwen-3.6-operator` (fast, thinking off) | Give the exact task, all inputs inline, and the exact output shape you want back (schema/format). It's the workhorse — favor it. |
-| Reasoning-heavy first pass: analyze *why*, enumerate trade-offs, draft a plan, structured comparison | **reasoner** → `qwen-3.6-thinking` | State the question + full context; ask for its reasoning. Slower per turn by design. |
-| Independent validation / second-opinion review / adversarial critique of a plan or diff | **validator** → `deepseek-r1-architect` (dispatch-only, no tool_calls) | Feed the artifact + the criteria; ask it to find flaws. Curl-dispatch only — not an interactive tool driver. |
-| Cheap classification / extraction / tagging at volume | **utility** → `llama-scout` (dispatch-only) | Tight instruction + the items; keep it small and mechanical. |
+| Read/summarize many files, log/diff/output analysis, wide grep-and-summarize, mechanical transforms, format conversion, repetitive spec-driven edits, boilerplate/scaffold, draft prose | **operator** | Exact task, all inputs inline, exact output shape (schema/format). The workhorse — favor it. |
+| Reasoning-heavy first pass: analyze *why*, enumerate trade-offs, draft a plan, structured comparison | **reasoner** | The question + full context; ask for its reasoning. Slower per turn. |
+| Independent validation / second-opinion / adversarial critique of a plan or diff | **validator** | Feed the artifact + the criteria; ask it to find flaws. Usually run as a curl dispatch — it critiques, it doesn't drive tools. |
+| Cheap classification / extraction / tagging at volume | **utility** | Tight instruction + the items; keep it small and mechanical. |
+
+**A partial roster is fine.** If `la-roles.sh` shows a role with no ● (nothing downloaded for it),
+keep that work on the cloud model or download a model for it (`install/download-models.sh`,
+interactive). If a role lists several ● models, that's your A/B choice — pick one or try both.
 
 ## Keep on the cloud model (quality-critical)
 Architecture / design decisions, tricky debugging, security-sensitive logic, the FINAL
@@ -37,11 +47,14 @@ review / verification, and the orchestration & judgment itself. Offload the legw
 judgment. **Verify local output before trusting it** — it's a smaller model, so a plausible-but-wrong
 answer is the risk; the point is that the legwork cost nothing.
 
-## Briefing (local agents start with NOTHING)
-The local server is **stateless per request** and the model has **none** of your CLAUDE.md, memory,
-role, or conversation context. Every dispatch must be self-contained: state the role you want it to
-play, paste the inputs it needs, and specify the exact output format. Resend the briefing each call.
-If a repo/agent-briefing index exists, fold the relevant bits into the prompt.
+## Briefing (local dispatch is stateless)
+A dispatch is a stateless HTTP call — nothing carries between requests — so each one must be
+self-contained: the role you want the model to play, the inputs, and the exact output format,
+resent every call. For a bounded mechanical stage that's usually all it needs (task + inputs), not
+your full rule set. If the delegated work is architecture/code-shaped **and you run the
+`brief-agents` plugin**, also fold the relevant lines of its `~/.claude/agent-briefing-index.md`
+into the prompt — handing a delegate your durable *rules* is brief-agents' job; this skill only
+covers the local-dispatch mechanics. (No dependency: without brief-agents, just skip that step.)
 
 ## How to dispatch
 ```bash

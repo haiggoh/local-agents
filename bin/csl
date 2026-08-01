@@ -8,6 +8,9 @@ _s="${BASH_SOURCE[0]}"; while [ -h "$_s" ]; do _d="$(cd -P "$(dirname "$_s")" &&
 CSL_DIR="$(cd -P "$(dirname "$_s")" && pwd)"
 LAUNCHER="${CSL_LAUNCHER:-$CSL_DIR/launch-claude-agent.sh}"
 
+# `csl roles` -> disk-aware role resolver (which on-disk model fills each role). Everything else
+# is passed straight through to the launcher.
+if [ "${1:-}" = "roles" ]; then shift; exec "$CSL_DIR/la-roles.sh" "$@"; fi
 if [ "$#" -gt 0 ]; then exec "$LAUNCHER" "$@"; fi
 
 # shellcheck source=/dev/null

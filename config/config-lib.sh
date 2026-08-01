@@ -13,18 +13,39 @@
 LA_CONFIG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LA_ROOT="$(cd "$LA_CONFIG_DIR/.." && pwd)"
 
+# --- roles: the STABLE vocabulary the routing rules refer to -------------------
+# The offload rules (skill + CLAUDE.md) route by ROLE, never by a specific model name, so the
+# roster can change without touching any rule. A model declares which role(s) it can fill via the
+# `roles` field of la_register; a role may be filled by 0, 1, or several models (several = the
+# user's A/B choice). These four are the canonical roles the rules assume — keep the names stable:
+#   operator  — bulk / mechanical / tool-driving (the workhorse; fast)
+#   reasoner  — reasoning-heavy first pass (analysis, trade-offs, plan drafts)
+#   validator — independent validation / second-opinion / adversarial review
+#   utility   — cheap classification / extraction at volume
+# Extra role tags beyond these are allowed and simply appended in reports.
+LA_CANONICAL_ROLES="operator reasoner validator utility"
+
 # --- model registry storage (populated by la_register in the config file) ----
 # Parallel arrays keyed by insertion; la_lookup fills LA_* vars for a given alias.
 LA_ALIASES=()
-declare -A LA_SUBDIR LA_SERVE LA_TOOLP LA_REASONP LA_THINK LA_SPOOF LA_EFFORT
+declare -A LA_SUBDIR LA_SERVE LA_TOOLP LA_REASONP LA_THINK LA_SPOOF LA_EFFORT LA_ROLES LA_REPO LA_SIZE
 
-# la_register <alias> <subdir> <serve:vllm|mlx_lm> <tool_parser> <reasoning_parser> <thinking:true|false> <spoof_id> <effort>
-# reasoning_parser may be "" (none). Called once per model from the config file.
+# la_register <alias> <subdir> <serve:vllm|mlx_lm> <tool_parser> <reasoning_parser>
+#             <thinking:true|false> <spoof_id> <effort> [roles] [hf_repo] [size_gb]
+# reasoning_parser may be "" (none). The last three are OPTIONAL and additive, so pre-existing
+# 8-field config lines keep working unchanged:
+#   roles    comma-separated role tags (see LA_CANONICAL_ROLES); "" = untagged (still launchable,
+#            just not offered by role in the resolver).
+#   hf_repo  Hugging Face repo id — lets the interactive installer download this model; "" = the
+#            installer won't manage it (you place the weights yourself).
+#   size_gb  approx download size, for the installer's disk/consent display; "" = unknown.
+# Called once per model from the config file.
 la_register() {
   local alias="$1"
   LA_ALIASES+=("$alias")
   LA_SUBDIR[$alias]="$2"; LA_SERVE[$alias]="$3"; LA_TOOLP[$alias]="$4"
   LA_REASONP[$alias]="$5"; LA_THINK[$alias]="$6"; LA_SPOOF[$alias]="$7"; LA_EFFORT[$alias]="$8"
+  LA_ROLES[$alias]="${9:-}"; LA_REPO[$alias]="${10:-}"; LA_SIZE[$alias]="${11:-}"
 }
 
 # --- optional selector PRESETS -----------------------------------------------
@@ -76,6 +97,28 @@ la_lookup() {
   LA_CUR_SPOOF="${LA_SPOOF[$a]}"
   LA_CUR_EFFORT="${LA_EFFORT[$a]}"
   return 0
+}
+
+# la_on_disk <alias> -> 0 if the model's weights directory exists and is non-empty. This is what
+# makes the roster "informed by what's actually available": a registered model isn't usable until
+# its files are present, so the resolver/installer check disk, not just registration.
+la_on_disk() {
+  local sub="${LA_SUBDIR[$1]:-}" d
+  [ -n "$sub" ] || return 1
+  d="$LA_MODELS_DIR/$sub"
+  [ -d "$d" ] && [ -n "$(ls -A "$d" 2>/dev/null)" ]
+}
+
+# la_models_for_role <role> -> prints, one per line, the aliases tagged with <role> (any position
+# in their comma-separated roles list). Empty output = no model fills that role.
+la_models_for_role() {
+  local want="$1" a r rest
+  for a in "${LA_ALIASES[@]}"; do
+    rest=",${LA_ROLES[$a]:-},"
+    # normalize spaces so " operator, reasoner " matches
+    rest="${rest// /}"
+    case "$rest" in *,"$want",*) echo "$a";; esac
+  done
 }
 
 # la_aliases_help -> prints the registered aliases (for usage messages).
