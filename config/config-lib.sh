@@ -17,12 +17,14 @@ LA_ROOT="$(cd "$LA_CONFIG_DIR/.." && pwd)"
 # The offload rules (skill + CLAUDE.md) route by ROLE, never by a specific model name, so the
 # roster can change without touching any rule. A model declares which role(s) it can fill via the
 # `roles` field of la_register; a role may be filled by 0, 1, or several models (several = the
-# user's A/B choice). These four are the canonical roles the rules assume — keep the names stable:
-#   operator  — bulk / mechanical / tool-driving (the workhorse; fast)
-#   reasoner  — reasoning-heavy first pass (analysis, trade-offs, plan drafts)
-#   validator — independent validation / second-opinion / adversarial review
-#   utility   — cheap classification / extraction at volume
-# Extra role tags beyond these are allowed and simply appended in reports.
+# user's A/B choice). One model can also fill several roles by varying EFFORT/thinking (fast =
+# operator/utility, deeper = reasoner/validator), so a small roster spans a wide role spectrum.
+# These four are the current canonical roles — keep the names stable, but they're EXTENSIBLE (add
+# tags like coder/vision/long-context as the roster grows; reports list canonical + extras):
+#   operator  — the BROAD DEFAULT / catch-all: bulk / mechanical / tool-driving (favor it)
+#   reasoner  — escalation: reasoning-heavy first pass (analysis, trade-offs, plan drafts)
+#   validator — escalation: independent validation / second-opinion / adversarial review
+#   utility   — down-shift: cheap classification / extraction at volume
 LA_CANONICAL_ROLES="operator reasoner validator utility"
 
 # --- model registry storage (populated by la_register in the config file) ----
