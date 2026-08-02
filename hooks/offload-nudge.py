@@ -29,11 +29,12 @@ def main():
             "is the DEFAULT, not a mandate. Roles are a spectrum: operator (broad default) · reasoner · "
             "validator · utility — one model fills several by varying effort. Resolve on-disk models "
             f"(and effort) with `{resolver}`; dispatch via curl, or bin/librarian-dispatch.py (SSE) "
-            "for long/open-ended generations (stall watchdog, no timeout death). Tool use is fine "
-            "locally — route tool-driving work to a local SESSION (qwen-class models drive tools "
-            "normally); only a stateless dispatch can't run a tool loop, so it's not a cloud reason. "
-            "The smell is reflexively doing BULK/mechanical work yourself on the paid model — not "
-            "skipping offload on trivia. Full guidance: the offload-to-local skill."
+            "for long/open-ended generations (stall watchdog, no timeout death). Tool use is NOT a "
+            "cloud reason — a local SESSION drives tools fine (only a stateless dispatch can't); "
+            "coupled tool-work usually stays on cloud, and a parallel local session is a deliberate "
+            "option for a big isolated chunk (see the skill). The smell is reflexively doing BULK/"
+            "mechanical work yourself on the paid model — not skipping offload on trivia. Full "
+            "guidance: the offload-to-local skill."
         )
         print(json.dumps({
             "hookSpecificOutput": {

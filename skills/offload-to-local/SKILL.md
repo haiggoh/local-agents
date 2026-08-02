@@ -72,12 +72,25 @@ review / verification, and the orchestration & judgment itself. Offload the legw
 judgment. **Verify local output before trusting it** — it's a smaller model, so a plausible-but-wrong
 answer is the risk; the point is that the legwork cost nothing.
 
-**Tool use is NOT a reason to avoid local.** A local *session* (e.g. the operator via
+**Tool use is NOT a reason to avoid local.** A local *session* (the operator via
 `launch-claude-agent.sh`) drives Claude Code's tools fine — qwen-class models handle tool-calling
-normally. The only tool limit is mechanism-specific: a stateless curl *dispatch* is a single
-completion, so it can't run a tool loop. So route tool-driving work to a local **session**, not to
-cloud; keep a step on cloud only if it must interleave with *this* session's live tools mid-task.
-"It involves tools" does not disqualify local.
+normally; only a stateless curl *dispatch* can't run a tool loop. So "it involves tools" never
+disqualifies local. But be honest about the default: for tool-driving work **coupled to what this
+session is already doing**, cloud is usually right — it holds the live context and tool state. The
+local-*session* route is a deliberate move for one specific shape of work (below), not the default.
+
+### Advanced: delegate a tool-driving chunk to a parallel local session
+Worth it for a **big, isolated, verifiable** chunk (e.g. a mechanical refactor across many files then
+run the tests) — not for small or tightly-coupled tool-work. Launch a local session as a side worker
+(`bin/new-local-window.sh <alias>` opens an independent window) and let it grind while this cloud
+session continues. To make it pay off and stay safe:
+- **Isolate** — give it its own git worktree/branch or a disjoint file set, so the two agents can't clobber each other.
+- **Watch + verify** — local models hallucinate paths and botch tool schemas; supervise the session (tail its log / a monitor) and review its diff before trusting it. Never merge unsupervised local edits blind.
+- **Mind the infra** — vllm-mlx is single-slot and minutes-per-turn: this suits a long *background* chunk, not latency-sensitive or interactive-with-you work, and a busy session queues your own dispatches.
+- **Amortize** — launching a session costs more than a curl dispatch; reach for it only when the chunk is substantial. Smaller → dispatch it, or keep it on cloud.
+
+The supervision + review is real cloud-attention cost, so the win is cheap *compute*, not zero effort.
+Use it when the chunk is big enough that $0 tool-driving compute clearly beats the coordination overhead.
 
 ## Briefing (local dispatch is stateless)
 A dispatch is a stateless HTTP call — nothing carries between requests — so each one must be
