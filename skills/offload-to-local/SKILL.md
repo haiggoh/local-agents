@@ -24,8 +24,7 @@ bulk/mechanical steps — and *always* under a budget constraint — annotate **
 
 **Default to `operator`.** Under a budget constraint the burden flips: a step is `local:operator`
 unless you can name why it's `cloud:`. Valid `cloud:` reasons are of two kinds:
-- **quality/capability** — frontier reasoning, security-critical, final review, or it needs live
-  tools the local model can't drive; and
+- **quality/capability** — frontier reasoning, security-critical, or final review/verification; and
 - **cost-benefit** — the work is small or one-off and the spin-up/briefing overhead would exceed the
   saving (`cloud:not worth offloading`). This is a first-class, legitimate reason, not a cop-out.
 
@@ -43,7 +42,7 @@ spectrum of depth, not a narrow bucket. **When in doubt, `operator`.**
 |---|---|---|
 | **operator** (DEFAULT) | anything delegatable: read/search/summarize many files, log/diff/output analysis, mechanical transforms, format conversion, repetitive spec-driven edits, boilerplate/scaffold, draft prose, straightforward extraction. If it's not clearly one of the below, it's operator. | Exact task, inputs inline, exact output shape. Favor it. |
 | **reasoner** (escalate) | the chunk needs real multi-step reasoning: analyze *why*, enumerate trade-offs, draft a plan, structured comparison. | Question + full context; ask for its reasoning. |
-| **validator** (escalate) | independent validation / second-opinion / adversarial critique of a plan or diff. | Artifact + criteria; ask it to find flaws. Usually a curl dispatch — it critiques, doesn't drive tools. |
+| **validator** (escalate) | independent validation / second-opinion / adversarial critique of a plan or diff. | Artifact + criteria; ask it to find flaws. Usually a curl dispatch (review needs no tool-driving). |
 | **utility** (down-shift) | trivial classification / extraction / tagging at high volume, where even operator is overkill. | Tight instruction + the items; keep it mechanical. |
 
 **Roles are filled by a (model × effort/thinking) pairing — not one model each.** The SAME weights
@@ -73,6 +72,13 @@ review / verification, and the orchestration & judgment itself. Offload the legw
 judgment. **Verify local output before trusting it** — it's a smaller model, so a plausible-but-wrong
 answer is the risk; the point is that the legwork cost nothing.
 
+**Tool use is NOT a reason to avoid local.** A local *session* (e.g. the operator via
+`launch-claude-agent.sh`) drives Claude Code's tools fine — qwen-class models handle tool-calling
+normally. The only tool limit is mechanism-specific: a stateless curl *dispatch* is a single
+completion, so it can't run a tool loop. So route tool-driving work to a local **session**, not to
+cloud; keep a step on cloud only if it must interleave with *this* session's live tools mid-task.
+"It involves tools" does not disqualify local.
+
 ## Briefing (local dispatch is stateless)
 A dispatch is a stateless HTTP call — nothing carries between requests — so each one must be
 self-contained: the role you want the model to play, the inputs, and the exact output format,
@@ -89,5 +95,8 @@ PORT=$(<repo>/bin/local-llm-hotswap.sh <alias> | grep -o 'SUCCESS_PORT=[0-9]*' |
 curl -s http://localhost:$PORT/v1/chat/completions -H 'Content-Type: application/json' \
   -d '{"model":"<alias-or-spoof>","messages":[{"role":"user","content":"<role + task + inputs + output spec>"}],"max_tokens":1024}'
 ```
-For long generations use `<repo>/bin/librarian-dispatch.py` (SSE + stall watchdog). For a single
-trivial item where spin-up costs more than it saves, just do it; when unsure, offload.
+**Stream long or open-ended generations** with `<repo>/bin/librarian-dispatch.py` (SSE). Why stream:
+a **stall watchdog** aborts a hung local server (no tokens for N s) instead of blocking forever on a
+dead request; no timeout death on multi-minute runs (the connection keeps receiving); and live
+progress. Plain curl (above) is fine for short, bounded calls. For a single trivial item where
+spin-up costs more than it saves, just do it; when unsure, offload.
