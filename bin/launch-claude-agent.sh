@@ -44,6 +44,13 @@ export ANTHROPIC_BASE_URL="http://localhost:${VLLM_PORT}"    # NO /v1 — Claude
 export ANTHROPIC_AUTH_TOKEN="local"                           # vllm ignores auth; avoids the API-key prompt
 export CLAUDE_IS_LOCAL="true"                                 # generic signal that this session is local
 export CLAUDE_CODE_MAX_OUTPUT_TOKENS="$LA_MAX_OUTPUT_TOKENS"   # bound worst-case turn time + stay under max_model_len
+# Timeouts: Claude Code's defaults assume a fast cloud endpoint. A local 27B doing a big prefill over
+# many tools routinely exceeds them, causing a "Request timed out" + retry-loop mid-session. Relax both
+# for local sessions (see README "Timeouts"): API_TIMEOUT_MS = overall per-request cap (default 600000
+# =10min); API_FORCE_IDLE_TIMEOUT=0 disables the 5-min "no bytes arrived yet" abort that a slow first
+# token (long prefill) would otherwise trip before generation even starts.
+export API_TIMEOUT_MS="$LA_API_TIMEOUT_MS"
+export API_FORCE_IDLE_TIMEOUT=0
 
 echo "🔗 Direct local channel → $ANTHROPIC_BASE_URL  (model: ${MODEL_SPOOF}, effort: ${EFFORT})"
 

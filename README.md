@@ -174,6 +174,12 @@ Re-apply after any `vllm-mlx` reinstall/upgrade: `git -C <vllm-mlx> apply vllm-m
 - **Direct request 500s "System message must be at the beginning"** — the fork patch isn't applied;
   re-apply `vllm-mlx-local-fork-patches.patch`.
 - **Interactive turns are slow** — expected for large local models; prefer dispatch for focused work.
+- **"Request timed out" mid-session / a heavy turn never completes** — Claude Code's `API_TIMEOUT_MS`
+  defaults to 600000 (10 min) and it also aborts a stream after 5 min with no bytes; a local model doing
+  a big prefill over many tools can exceed both. The launcher relaxes them for local sessions
+  (`API_TIMEOUT_MS` = `LA_API_TIMEOUT_MS`, default 30 min; `API_FORCE_IDLE_TIMEOUT=0`). Tune
+  `LA_API_TIMEOUT_MS` in your config. Complementary lever: fewer tools = smaller prefill = faster turns
+  (a lighter MCP set, or start the session with `--strict-mcp-config`).
 
 ## License
 

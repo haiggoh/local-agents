@@ -22,6 +22,9 @@ LA_MAX_OUTPUT_TOKENS=8192              # native Claude Code output cap for local
 LA_MEMORY_BUDGET_GB=96                 # vllm-mlx per-model memory budget (tune to your RAM)
 LA_ADMISSION="wait"                    # SimpleEngine admission: wait (queue) | fail_fast
 LA_MAX_MODEL_LEN=32768
+LA_API_TIMEOUT_MS=1800000              # per-request timeout for local sessions (ms). Claude Code's
+                                       # default is 600000 (10 min) — too strict for a slow local model
+                                       # on a heavy prompt. 30 min gives headroom. (max 2147483647)
 
 # Optional: absolute path to your Claude Code auto-memory dir. If set, the agent
 # prompt tells the local model where memory lives (helps it avoid guessing paths).

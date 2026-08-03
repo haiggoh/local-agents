@@ -95,6 +95,10 @@ la_load_config() {
   : "${LA_MEMORY_BUDGET_GB:=96}"
   : "${LA_ADMISSION:=wait}"
   : "${LA_MAX_MODEL_LEN:=32768}"
+  # Claude Code's API_TIMEOUT_MS defaults to 600000 (10 min) — too strict for a slow local model on a
+  # heavy prompt (big prefill × many tools can exceed it, then retry-loop into a "Request timed out").
+  # Give local sessions generous headroom. (Max is 2147483647; stay well under.)
+  : "${LA_API_TIMEOUT_MS:=1800000}"   # 30 min per request for local sessions
   # Optional per-machine extras a user may want the agent prompt to know about (all optional):
   : "${LA_MEMORY_DIR:=}"          # absolute path to your auto-memory dir, if you want the agent told
   : "${LA_COUNCIL_NOTE:=}"        # optional extra line appended to the agent prompt (e.g. a council rule)
