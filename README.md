@@ -128,6 +128,57 @@ For long generations use `./bin/librarian-dispatch.py` (SSE + stall watchdog).
 `local-*` shell aliases (`local-operator`, `local-menu`, `local-window`, …). Idempotent; edits only
 a fenced block in your shell rc.
 
+## Monitoring a running local session
+
+Local sessions run direct (no proxy), so there's **no reasoning tee** — you watch a running local
+session (or several) via two per-session sources. `bin/local-watch.sh` discovers what's running and
+prints ready-to-run monitor commands; feed them to your watcher (a terminal, or Claude Code's Monitor
+tool). It handles **multiple concurrent sessions** — each local server has its own port log, each
+session its own transcript.
+
+```bash
+./bin/local-watch.sh            # list running sessions, active ports, recent transcripts + monitor cmds
+./bin/local-watch.sh --health   # just the per-port vllm-log health monitors
+./bin/local-watch.sh --mutations# just the transcript mutation/thinking monitors
+```
+
+- **Health / turns / timeouts / stalls** → `~/.claude/logs/vllm_<PORT>.log` (one server = one log, so N
+  concurrent servers are unambiguous). Filter to `[REQUEST]`/`CLEANUP done`/timeout/error/disconnect;
+  drop the 5-second `disconnect_guard poll` heartbeats.
+- **Mutations + reasoning** → the session's native transcript `.jsonl`: `tool_use` records
+  (Bash/Edit/Write/git/waypoints…) and `type:"thinking"` blocks.
+- **Post-hoc chain-of-thought** → `bin/thinking-log.py --latest --local-only` (extracts the reasoning
+  blocks; `--local-only` = unsigned = the local model's).
+
+**How live is it?** Two separate delays: the model's **generation** latency (minutes for a big local
+turn — inherent; reasoning doesn't exist until it's generated, and a non-streaming turn delivers it
+whole at the end) and the transcript **flush** lag (turn completes → record on disk). Measured on
+Claude Code 2.1.205, the flush lag for the reasoning-carrying `assistant` records is **~0.2–2.6s** —
+so once a turn finishes, its thinking/tools are readable within a few seconds. Re-check after a Claude
+Code upgrade (it regressed to 30+min on 2.1.197 once):
+
+```bash
+# print how many seconds after each new record's timestamp it lands on disk (run during activity)
+python3 - <<'PY'
+import time,os,json,datetime,glob
+p=max(glob.glob(os.path.expanduser("~/.claude/projects/*/*.jsonl")),key=os.path.getmtime)
+f=open(p); f.seek(0,2)
+end=time.time()+120
+while time.time()<end:
+    ln=f.readline()
+    if not ln: time.sleep(0.1); continue
+    try: r=json.loads(ln); t=datetime.datetime.fromisoformat(r["timestamp"].replace("Z","+00:00")).timestamp()
+    except: continue
+    print(f"{r.get('type','?'):10} flush≈{time.time()-t:4.1f}s", flush=True)
+PY
+```
+
+**Limitation vs the retired proxy era:** the old in-path proxy could livestream reasoning
+*token-by-token*; the transcript gives it per-turn (after ~sub-3s flush), not mid-generation. If you
+need true live thinking, the non-invasive path is a vllm-mlx **server-side token log** (a fork patch
+that tees streamed tokens/reasoning to a per-request file) — restores the live stream without a
+request-path proxy that would re-break native transcripts.
+
 ## The fork patches (required for direct routing)
 
 `install/vllm-mlx-local-fork-patches.patch` applies three fixes not in upstream `v0.4.0`:
