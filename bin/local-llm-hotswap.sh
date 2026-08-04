@@ -35,7 +35,12 @@ if [ ! -d "$MODEL_DIR" ]; then echo "❌ model dir not found: $MODEL_DIR (check 
 # --- bounded readiness wait (dumps log tail + PID liveness on timeout; validates identity) ----
 wait_ready() {
     local port="$1" logf="$2" label="${3:-server}" pid="${4:-}" expected_id="${5:-}"
-    local timeout="${HOTSWAP_READY_TIMEOUT:-480}" deadline=$(( SECONDS + timeout ))
+    # NOTE: keep these on SEPARATE `local` lines. Under `set -u`, a single
+    # `local a=x b=$((...a...))` evaluates every RHS before binding any name, so `timeout`
+    # inside the arithmetic resolves to a not-yet-set variable -> "timeout: unbound variable"
+    # (localized "timeout ist nicht gesetzt"), which aborted wait_ready and suppressed SUCCESS_PORT.
+    local timeout="${HOTSWAP_READY_TIMEOUT:-480}"
+    local deadline=$(( SECONDS + timeout ))
     until curl -s --max-time 2 "http://localhost:$port/v1/models" > /dev/null 2>&1; do
         if (( SECONDS >= deadline )); then
             { echo "❌ $label startup FAILED — /v1/models silent after ${timeout}s (port $port, log $logf)"
