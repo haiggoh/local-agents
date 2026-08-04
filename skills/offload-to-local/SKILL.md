@@ -108,8 +108,35 @@ PORT=$(<repo>/bin/local-llm-hotswap.sh <alias> | grep -o 'SUCCESS_PORT=[0-9]*' |
 curl -s http://localhost:$PORT/v1/chat/completions -H 'Content-Type: application/json' \
   -d '{"model":"<alias-or-spoof>","messages":[{"role":"user","content":"<role + task + inputs + output spec>"}],"max_tokens":1024}'
 ```
-**Stream long or open-ended generations** with `<repo>/bin/librarian-dispatch.py` (SSE). Why stream:
-a **stall watchdog** aborts a hung local server (no tokens for N s) instead of blocking forever on a
-dead request; no timeout death on multi-minute runs (the connection keeps receiving); and live
-progress. Plain curl (above) is fine for short, bounded calls. For a single trivial item where
-spin-up costs more than it saves, just do it; when unsure, offload.
+**Stream long or open-ended generations** with `librarian-dispatch.py` (SSE). Why stream: a **stall
+watchdog** aborts a hung local server (no tokens for N s) instead of blocking forever on a dead
+request; no timeout death on multi-minute runs (the connection keeps receiving); and live progress.
+It takes a **JSON body file** and an output dir (NOT `--prompt`/`--model` flags):
+```bash
+# write a standard chat-completions body, then dispatch it:
+echo '{"model":"<alias-or-spoof>","max_tokens":800,"messages":[{"role":"user","content":"<role + task + inputs + output spec>"}]}' > /tmp/body.json
+<repo>/bin/librarian-dispatch.py --port "$PORT" --payload /tmp/body.json --outdir /tmp/la-out
+# assistant text streams to /tmp/la-out/output.txt; live heartbeats print on stdout;
+# exit 0 = done, 2 = HTTP/engine error, 3 = transport. (The script sets stream=true for you.)
+```
+Don't wrap dispatches in `timeout` — it's GNU-only (absent on stock macOS) and the built-in stall
+watchdog already handles a hung server. Plain curl (above) is fine for short, bounded calls. For a
+single trivial item where spin-up costs more than it saves, just do it; when unsure, offload.
+
+## The supervised offload loop (put it together)
+Offloading pays off only when you **supervise** it. The repeatable loop:
+1. **Warm** the model once up front (`local-llm-hotswap.sh <alias>`, backgroundable) so the first
+   dispatch isn't paying cold-start latency; capture the `SUCCESS_PORT` it prints.
+2. **Route** — resolve role→model with `la-roles.sh` (never hardcode a name).
+3. **Decide** per step: `local:<role>` or `cloud:<reason>` (above).
+4. **Dispatch** the local step self-contained (stateless — resend the full briefing).
+5. **VERIFY against ground truth** — never trust local output blind. Compare it to something known
+   (the real file list, a functional test, a diff) and judge by an *observable outcome change*, not
+   "it replied / no error." A smaller model's failure mode is plausible-but-wrong.
+6. **Correct** — if it's off (hallucinated path, stale interface, wrong shape), fix the briefing and
+   re-dispatch, or finish on cloud. Retrying is cheap; the compute was free.
+7. **Ship** (when the work is a repo/plugin change): verify → commit → push → reinstall → confirm it's
+   live in the *installed* copy, not just the source tree.
+
+Grab cheap ground truth **before** dispatching (e.g. `ls` the real files) so step 5 is a comparison,
+not a fresh guess. The supervision is real cloud attention — that's the cost; the legwork compute is $0.

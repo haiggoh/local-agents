@@ -17,8 +17,13 @@ without ever interrupting the read.
 Usage:
   librarian-dispatch.py --port PORT --payload BODY.json --outdir DIR
 
+BODY.json is a standard chat-completions request body (this script forces stream=true), e.g.:
+  {"model":"<alias-or-spoof>","max_tokens":800,
+   "messages":[{"role":"user","content":"<role + task + inputs + output spec>"}]}
+
 Assistant text streams to DIR/output.txt as it arrives. On completion writes DIR/done
 (json: tokens/chars/usage/elapsed). Exit 0 on completion, 2 on HTTP/engine error, 3 transport.
+NOTE: takes a JSON body file (--payload), NOT --prompt/--model flags.
 """
 import argparse
 import json

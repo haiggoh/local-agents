@@ -114,7 +114,12 @@ PORT=$(./bin/local-llm-hotswap.sh my-operator | grep -o 'SUCCESS_PORT=[0-9]*' | 
 curl -s http://localhost:$PORT/v1/chat/completions -H 'Content-Type: application/json' \
   -d '{"model":"my-operator","messages":[{"role":"user","content":"..."}],"max_tokens":512}'
 ```
-For long generations use `./bin/librarian-dispatch.py` (SSE + stall watchdog).
+For long generations use `./bin/librarian-dispatch.py --port PORT --payload BODY.json --outdir DIR`
+(SSE + stall watchdog; takes a JSON body file, not `--prompt`/`--model`; text lands in `DIR/output.txt`).
+
+**Supervise it.** Offloading pays off only when you verify the result: warm → route (`la-roles.sh`) →
+decide `local:`/`cloud:` per step → dispatch → **verify against ground truth** (never trust local
+output blind) → correct/re-dispatch → ship. The `offload-to-local` skill documents this loop in full.
 
 **Way 2 — full local session** (niche; slower per turn):
 ```bash
