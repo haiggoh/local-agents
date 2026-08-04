@@ -21,9 +21,11 @@ BODY.json is a standard chat-completions request body (this script forces stream
   {"model":"<alias-or-spoof>","max_tokens":800,
    "messages":[{"role":"user","content":"<role + task + inputs + output spec>"}]}
 
-Assistant text streams to DIR/output.txt as it arrives. On completion writes DIR/done
-(json: tokens/chars/usage/elapsed). Exit 0 on completion, 2 on HTTP/engine error, 3 transport.
-NOTE: takes a JSON body file (--payload), NOT --prompt/--model flags.
+Assistant text streams to DIR/output.txt as it arrives; reasoning/thinking (delta.reasoning_content,
+emitted live when a reasoning parser is active) streams SEPARATELY to DIR/reasoning.txt and shows as
+`think~N` in the heartbeat — so a long think is observable in real time. On completion writes DIR/done
+(json: tokens/chars/reasoning_tokens/reasoning_chars/usage/elapsed). Exit 0 on completion, 2 on
+HTTP/engine error, 3 transport. NOTE: takes a JSON body file (--payload), NOT --prompt/--model flags.
 """
 import argparse
 import json
@@ -80,9 +82,11 @@ def main():
 
     out_path = os.path.join(a.outdir, "output.txt")
     out = open(out_path, "w")
+    reasoning_path = os.path.join(a.outdir, "reasoning.txt")
+    rout = open(reasoning_path, "w")
 
     st = {"t0": time.time(), "last_data": time.time(), "ntok": 0, "chars": 0,
-          "done": False, "tail": "", "srv_pid": None}
+          "rtok": 0, "rchars": 0, "done": False, "tail": "", "srv_pid": None}
 
     def watchdog():
         while not st["done"]:
@@ -105,8 +109,8 @@ def main():
                     flag = "  ⏳ no tokens %ds but server CPU %.0f%% (prefilling, not hung)" % (int(since), cpu)
                 else:
                     flag = "  ⚠ no data %ds AND server CPU %.0f%% (likely HUNG)" % (int(since), cpu)
-            print("[t=%ds tok~%d last+%ds]%s …%s" % (
-                int(now - st["t0"]), st["ntok"], int(since), flag, st["tail"]), flush=True)
+            print("[t=%ds tok~%d think~%d last+%ds]%s …%s" % (
+                int(now - st["t0"]), st["ntok"], st["rtok"], int(since), flag, st["tail"]), flush=True)
 
     print("[dispatch] POST %s model=%s payload=%dB stream=on" % (
         url, body.get("model", "?"), os.path.getsize(req_path)), flush=True)
@@ -137,7 +141,21 @@ def main():
             except Exception:
                 continue
             choices = obj.get("choices") or [{}]
-            delta = (choices[0].get("delta") or {}).get("content") or ""
+            dobj = choices[0].get("delta") or {}
+            # Reasoning/thinking streams LIVE as its own delta field (reasoning_content),
+            # separate from content — vllm-mlx emits it token-by-token when a reasoning parser
+            # is active. Surface it so a long think is observable in real time (tail reasoning.txt
+            # / watch think~N), and so a reasoning-only turn isn't misread as "NO DATA".
+            rdelta = dobj.get("reasoning_content") or dobj.get("reasoning") or ""
+            if rdelta:
+                got_data = True
+                rout.write(rdelta)
+                rout.flush()
+                st["rtok"] += 1
+                st["rchars"] += len(rdelta)
+                st["last_data"] = time.time()
+                st["tail"] = (st["tail"] + rdelta)[-70:].replace("\n", " ")
+            delta = dobj.get("content") or ""
             if delta:
                 got_data = True
                 out.write(delta)
@@ -151,6 +169,7 @@ def main():
     finally:
         st["done"] = True
         out.close()
+        rout.close()
         proc.wait()
 
     elapsed = int(time.time() - st["t0"])
@@ -161,9 +180,11 @@ def main():
         print("[dispatch] NO DATA (t=%ds). Engine/HTTP response: %s" % (elapsed, body_txt),
               flush=True)
         return 2
-    print("[dispatch] DONE t=%ds tok~%d chars=%d usage=%s" % (
-        elapsed, st["ntok"], st["chars"], usage), flush=True)
-    json.dump({"tokens": st["ntok"], "chars": st["chars"], "usage": usage, "elapsed": elapsed},
+    print("[dispatch] DONE t=%ds tok~%d think~%d chars=%d usage=%s" % (
+        elapsed, st["ntok"], st["rtok"], st["chars"], usage), flush=True)
+    json.dump({"tokens": st["ntok"], "chars": st["chars"],
+               "reasoning_tokens": st["rtok"], "reasoning_chars": st["rchars"],
+               "usage": usage, "elapsed": elapsed},
               open(os.path.join(a.outdir, "done"), "w"))
     return 0
 
