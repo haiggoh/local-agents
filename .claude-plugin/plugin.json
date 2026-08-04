@@ -1,6 +1,6 @@
 {
   "name": "local-agents",
-  "version": "0.2.11",
+  "version": "0.2.12",
   "description": "Save cost by offloading Claude Code work to free local MLX models (Apple Silicon). MAIN use: dispatch delegatable sub-tasks from your normal cloud session (Opus/Sonnet) to a local model — keep your capable model driving, hand off bulk/mechanical work. Optional full local mode (niche, for cost/budget-constrained stretches) via a spoofed model id + direct vllm-mlx routing (native transcripts/history preserved). Additive overlay: private paths/keys in a gitignored config.local, settings.json untouched. Works whether Claude Code connects to Anthropic directly or via a gateway.",
   "author": {
     "name": "Heiko Brantsch"

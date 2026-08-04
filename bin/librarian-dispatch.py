@@ -14,24 +14,28 @@ THREAD prints a heartbeat every HEARTBEAT s regardless of whether tokens are flo
 long prefill shows "alive" ticks and a real stall (no new data for STALL s) is flagged —
 without ever interrupting the read.
 
-Usage:
-  librarian-dispatch.py --port PORT --payload BODY.json --outdir DIR
+Usage (two interfaces):
+  librarian-dispatch.py --port PORT --payload BODY.json [--outdir DIR]   # primary: full JSON body
+  librarian-dispatch.py --port PORT --prompt "TEXT" [--model M] [--max-tokens N] [--outdir DIR]  # convenience
 
 BODY.json is a standard chat-completions request body (this script forces stream=true), e.g.:
   {"model":"<alias-or-spoof>","max_tokens":800,
    "messages":[{"role":"user","content":"<role + task + inputs + output spec>"}]}
+With --prompt (no --payload), the body is synthesized (model defaults to the claude-opus-4-8 spoof
+all local servers answer to). --outdir defaults to a fresh temp dir (its path is printed on start).
 
 Assistant text streams to DIR/output.txt as it arrives; reasoning/thinking (delta.reasoning_content,
 emitted live when a reasoning parser is active) streams SEPARATELY to DIR/reasoning.txt and shows as
 `think~N` in the heartbeat — so a long think is observable in real time. On completion writes DIR/done
 (json: tokens/chars/reasoning_tokens/reasoning_chars/usage/elapsed). Exit 0 on completion, 2 on
-HTTP/engine error, 3 transport. NOTE: takes a JSON body file (--payload), NOT --prompt/--model flags.
+HTTP/engine error, 3 transport.
 """
 import argparse
 import json
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 
@@ -66,19 +70,35 @@ def _cpu_pct(pid):
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(
+        epilog="Provide EITHER --payload BODY.json (primary) OR the convenience flags "
+               "--prompt/--model, which synthesize the body. --outdir defaults to a fresh temp dir.")
     ap.add_argument("--port", required=True)
-    ap.add_argument("--payload", required=True)
-    ap.add_argument("--outdir", required=True)
+    ap.add_argument("--payload", help="JSON chat-completions body file (primary interface)")
+    ap.add_argument("--outdir", help="output dir (default: a fresh temp dir, path printed on start)")
+    ap.add_argument("--prompt", help="convenience: user prompt; synthesizes the body when --payload is omitted")
+    ap.add_argument("--model", default="claude-opus-4-8",
+                    help="convenience: model id for --prompt (default: the claude-opus-4-8 spoof all local servers answer to)")
+    ap.add_argument("--max-tokens", type=int, default=1024,
+                    help="convenience: max_tokens for --prompt (default 1024)")
     a = ap.parse_args()
+
+    if not a.payload and not a.prompt:
+        ap.error("provide either --payload BODY.json or --prompt TEXT")
+    a.outdir = a.outdir or tempfile.mkdtemp(prefix="librarian-")
     os.makedirs(a.outdir, exist_ok=True)
 
-    body = json.load(open(a.payload))
+    if a.payload:
+        body = json.load(open(a.payload))
+    else:
+        body = {"model": a.model, "max_tokens": a.max_tokens,
+                "messages": [{"role": "user", "content": a.prompt}]}
     body["stream"] = True
     body.setdefault("stream_options", {"include_usage": True})
     req_path = os.path.join(a.outdir, "_req.json")
     json.dump(body, open(req_path, "w"))
     url = "http://localhost:%s/v1/chat/completions" % a.port
+    print("[dispatch] outdir=%s" % a.outdir, flush=True)
 
     out_path = os.path.join(a.outdir, "output.txt")
     out = open(out_path, "w")
