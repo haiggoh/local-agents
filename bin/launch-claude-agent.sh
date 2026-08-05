@@ -34,6 +34,26 @@ LAUNCH_OUTPUT=$("$LAUNCH_DIR/local-llm-hotswap.sh" "$MODEL_ALIAS"); echo "$LAUNC
 VLLM_PORT=$(echo "$LAUNCH_OUTPUT" | grep -o "SUCCESS_PORT=[0-9]*" | cut -d'=' -f2)
 [ -z "$VLLM_PORT" ] && { echo "❌ Could not determine the server port."; exit 1; }
 
+# Pick a spoof id THIS PORT ACTUALLY SERVES. hotswap REUSES an already-healthy server rather
+# than relaunching, so the resolved port may be hosting a process started from an older config
+# that predates a spoof_id change — handing it our newest preferred id would just 404:
+#   {"detail":"The model `claude-opus-5` does not exist. Available models: `claude-opus-4-8`..."}
+# Intersecting the configured preference list with /v1/models makes the launcher correct against
+# servers of any vintage, with no restart required.
+_served=$(curl -s --max-time 5 "http://localhost:$VLLM_PORT/v1/models" 2>/dev/null \
+          | grep -o '"id":"[^"]*"' | cut -d'"' -f4 | tr '\n' ' ')
+MODEL_SPOOF=""
+for _cand in $(printf '%s' "$LA_CUR_SPOOF" | tr ',' ' '); do
+    case " $_served " in *" $_cand "*) MODEL_SPOOF="$_cand"; break ;; esac
+done
+if [ -z "$MODEL_SPOOF" ]; then
+    MODEL_SPOOF="${LA_CUR_SPOOF%%,*}"
+    echo "⚠️  Port $VLLM_PORT advertises none of the configured spoof ids ($LA_CUR_SPOOF)."
+    echo "    Served: ${_served:-<none>}"
+    echo "    Falling back to '$MODEL_SPOOF'. If the session 404s, restart that server so it"
+    echo "    picks up the current config (its ids are fixed at launch time)."
+fi
+
 # mlx_lm.server tiers (e.g. Llama-4) serve OpenAI-only under a path id — no Anthropic /v1/messages,
 # so a direct interactive session can't reach them. They stay dispatch-only (curl / librarian-dispatch).
 if [ "$LA_CUR_SERVE" = "mlx_lm" ]; then
