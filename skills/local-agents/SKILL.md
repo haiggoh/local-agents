@@ -1,6 +1,6 @@
 ---
 name: local-agents
-description: Use when the user wants to offload Claude Code work to a LOCAL MLX model to save cost — PRIMARILY dispatching a delegatable sub-task from their normal cloud session (Opus/Sonnet), and secondarily running a full local session. Triggers: "dispatch this to a local model", "offload this locally to save cost", "run this on qwen locally", "start a local session / local mode", "run the local model tournament", or working offline. Explains how to drive the local-agents overlay: dispatch focused prompts (main use), launch a full local session (niche), and run the diagnostic harnesses. Do NOT use for ordinary cloud work that isn't being offloaded.
+description: 'Use when the user wants to offload Claude Code work to a LOCAL MLX model to save cost — PRIMARILY dispatching a delegatable sub-task from their normal cloud session (Opus/Sonnet), and secondarily running a full local session. Triggers: "dispatch this to a local model", "offload this locally to save cost", "run this on qwen locally", "start a local session / local mode", "run the local model tournament", or working offline. Explains how to drive the local-agents overlay: dispatch focused prompts (main use), launch a full local session (niche), and run the diagnostic harnesses. Do NOT use for ordinary cloud work that isn''t being offloaded.'
 ---
 
 # local-agents — driving local MLX inference
