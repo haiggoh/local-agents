@@ -23,7 +23,9 @@ EFFORT_OVERRIDE="${2:-}"
 if [ -z "$MODEL_ALIAS" ] || ! la_lookup "$MODEL_ALIAS"; then
     echo "Usage: $0 <alias> [effort-override]"; echo "Registered aliases:"; la_aliases_help; exit 1
 fi
-MODEL_SPOOF="$LA_CUR_SPOOF"
+# spoof_id may be a comma-separated preference list (newest Claude model first). The SERVER
+# answers to all of them; the CLIENT must be handed exactly one, so use the preferred (first).
+MODEL_SPOOF="${LA_CUR_SPOOF%%,*}"
 EFFORT="${EFFORT_OVERRIDE:-$LA_CUR_EFFORT}"
 EFFORT_FLAG="--effort $EFFORT"
 

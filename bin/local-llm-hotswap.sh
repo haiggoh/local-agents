@@ -95,19 +95,33 @@ fi
 
 # --- vllm-mlx branch ---------------------------------------------------------
 TMP_CONFIG="$CONFIG_DIR/vllm_config_${TARGET_PORT}.yaml"
-cat > "$TMP_CONFIG" <<EOF
-manager:
-  memory_budget_gb: $LA_MEMORY_BUDGET_GB
-models:
-  - name: "$SPOOF_NAME"
-    path: "$MODEL_DIR"
-    max_model_len: $LA_MAX_MODEL_LEN
-    kv_cache_quantization_level: 4
-  - name: "$MODEL_NAME"
-    path: "$MODEL_DIR"
-    max_model_len: $LA_MAX_MODEL_LEN
-    kv_cache_quantization_level: 4
-EOF
+# spoof_id may be a COMMA-SEPARATED preference list, newest Claude model first
+# (e.g. "claude-opus-5,claude-opus-4-8"). We serve the SAME weights under EVERY id plus the
+# alias, so one server satisfies both a current Claude Code (which asks for the newest model)
+# and an older one still on the previous model — with no version detection anywhere. Without
+# this, a client asking for an unserved id gets a hard 404 from vllm:
+#   {"detail":"The model `claude-opus-5` does not exist. Available models: `claude-opus-4-8`..."}
+# Verified safe against vllm-mlx's own loader (model_registry.py): the registry is a
+# dict keyed by NAME and the only uniqueness check is on name — duplicate `path` values are
+# explicitly allowed. ⚠ CAVEAT: `_loaded` and the concurrent-load coalescer (`same_model_future`)
+# are ALSO keyed by name, not by source path, so if a single server is asked for TWO different
+# ids it will load the weights TWICE (~model-size each) until the memory-budget evictor reclaims
+# the idle one. Harmless in normal use — one client session sends one id for its whole lifetime —
+# but do NOT deliberately mix ids against one port.
+SPOOF_PRIMARY="${SPOOF_NAME%%,*}"          # first = preferred; what wait_ready checks for
+{
+  echo "manager:"
+  echo "  memory_budget_gb: $LA_MEMORY_BUDGET_GB"
+  echo "models:"
+  # shellcheck disable=SC2001
+  for _id in $(printf '%s' "$SPOOF_NAME" | tr ',' ' ') "$MODEL_NAME"; do
+    [ -n "$_id" ] || continue
+    echo "  - name: \"$_id\""
+    echo "    path: \"$MODEL_DIR\""
+    echo "    max_model_len: $LA_MAX_MODEL_LEN"
+    echo "    kv_cache_quantization_level: 4"
+  done
+} > "$TMP_CONFIG"
 
 EXTRA_ARGS="--enable-auto-tool-choice --tool-call-parser $TOOLP"
 [ -n "$REASONP" ] && EXTRA_ARGS="$EXTRA_ARGS --reasoning-parser $REASONP --default-temperature 0.6 --default-top-p 0.95"
@@ -115,6 +129,6 @@ export VLLM_MLX_ENABLE_THINKING="${VLLM_MLX_ENABLE_THINKING:-$THINK}"
 
 echo "🚀 Launching $MODEL_NAME on free port $TARGET_PORT  (🧠 thinking: $VLLM_MLX_ENABLE_THINKING)..."
 nohup "$LA_VENV/vllm-mlx" serve --models-config "$TMP_CONFIG" --port "$TARGET_PORT" $EXTRA_ARGS > "$LOG_FILE" 2>&1 &
-wait_ready "$TARGET_PORT" "$LOG_FILE" "$MODEL_NAME" "$!" "$SPOOF_NAME"
+wait_ready "$TARGET_PORT" "$LOG_FILE" "$MODEL_NAME" "$!" "$SPOOF_PRIMARY"
 tail -n 8 "$LOG_FILE"
 echo "SUCCESS_PORT=$TARGET_PORT"
