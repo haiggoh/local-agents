@@ -96,10 +96,10 @@ Use it when the chunk is big enough that $0 tool-driving compute clearly beats t
 A dispatch is a stateless HTTP call — nothing carries between requests — so each one must be
 self-contained: the role you want the model to play, the inputs, and the exact output format,
 resent every call. For a bounded mechanical stage that's usually all it needs (task + inputs), not
-your full rule set. If the delegated work is architecture/code-shaped **and you run the
-`brief-agents` plugin**, also fold the relevant lines of its `~/.claude/agent-briefing-index.md`
-into the prompt — handing a delegate your durable *rules* is brief-agents' job; this skill only
-covers the local-dispatch mechanics. (No dependency: without brief-agents, just skip that step.)
+your full rule set. If the delegated work is architecture/code-shaped **and you maintain a standing-rules
+index for delegated work**, also fold its relevant lines into the prompt — handing a delegate your
+durable *rules* belongs to whatever keeps that index; this skill only covers the local-dispatch
+mechanics. (No dependency: with no such index, skip that step.)
 
 ## How to dispatch
 ```bash
@@ -135,8 +135,10 @@ Offloading pays off only when you **supervise** it. The repeatable loop:
    "it replied / no error." A smaller model's failure mode is plausible-but-wrong.
 6. **Correct** — if it's off (hallucinated path, stale interface, wrong shape), fix the briefing and
    re-dispatch, or finish on cloud. Retrying is cheap; the compute was free.
-7. **Ship** (when the work is a repo/plugin change): verify → commit → push → reinstall → confirm it's
-   live in the *installed* copy, not just the source tree.
+7. **Hand off to your shipping discipline** (when the work is a repo/package change). Getting a change
+   *landed and live* is finish-discipline, not local-model discipline — it applies identically to work
+   you did yourself — so it is deliberately **not** specified here. Follow whatever shipping discipline
+   you already use for landing a change.
 
 Grab cheap ground truth **before** dispatching (e.g. `ls` the real files) so step 5 is a comparison,
 not a fresh guess. The supervision is real cloud attention — that's the cost; the legwork compute is $0.

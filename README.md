@@ -53,8 +53,20 @@ approach suppressed them).
   `check-tool-roundtrip.py`, `direct-route-acceptance.py`, `auto-mode-probe.sh`,
   `librarian-dispatch.py`, `thinking-log.py`, `git-local-review`.
 - **`bin/new-local-window.sh`** — open a full local session in a new, independent Terminal window (macOS).
-- **skills** — `local-agents` (drive local sessions & dispatch) and `offload-to-local` (a habit-forming
-  trigger to delegate bulk/mechanical work to a local model to save cost — the plugin's main idea).
+- **skills (7)** — two entry points plus five that each own one phase of a delegation:
+  - `local-agents` — drive local sessions & dispatch.
+  - `offload-to-local` — the habit-forming trigger to delegate bulk/mechanical work to a local model to
+    save cost. The plugin's main idea.
+  - `compose-the-payload` — build the dispatch **material** from files on disk, so the corpus never
+    enters your own context (this is the actual cost lever).
+  - `brief-the-delegate` — write the **instructions**: a stateless dispatch inherits nothing, so every
+    unstated ambiguity returns as a confident wrong answer.
+  - `isolate-parallel-work` — before dispatching: who owns which port, and does this delegate need its
+    own worktree?
+  - `guard-shared-runtime` — before touching the shared venv/server, and when the server misbehaves
+    (including the wedge whose health check still returns 200).
+  - `verify-delegated-work` — after it returns: judge by observable outcome change, never "no error",
+    and stop at the retry ceiling.
 
 ## Install
 
@@ -119,7 +131,8 @@ For long generations use `./bin/librarian-dispatch.py --port PORT --payload BODY
 
 **Supervise it.** Offloading pays off only when you verify the result: warm → route (`la-roles.sh`) →
 decide `local:`/`cloud:` per step → dispatch → **verify against ground truth** (never trust local
-output blind) → correct/re-dispatch → ship. The `offload-to-local` skill documents this loop in full.
+output blind) → correct/re-dispatch. The `offload-to-local` skill documents this loop in full. (Landing
+the change afterwards is ordinary shipping discipline, so this plugin deliberately doesn't specify it.)
 
 **Way 2 — full local session** (niche; slower per turn):
 ```bash
