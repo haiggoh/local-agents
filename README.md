@@ -45,6 +45,10 @@ approach suppressed them).
   model onto a free port, sets direct-routing env, injects a self-preservation + tool-use nudge).
 - **`bin/local-llm-hotswap.sh`** — land a registered model on the first free port; safe (never kills
   a healthy model on another port); bounded readiness with diagnostics.
+- **`bin/local-agent-dispatch.py`** — universal local model dispatcher, independent of any AI client
+  (Claude Code, AGY, or none). Shells out to `local-llm-hotswap.sh` + `librarian-dispatch.py` and
+  streams live tokens back to stdout. Install the shell aliases and symlink with `install/setup-shortcuts.sh`
+  (or add them manually — see [Local Agent Dispatch](#local-agent-dispatch) below).
 - **`bin/csl`** — menu front-end built from your configured aliases.
 - **`config/`** — the overlay: `config.example.sh` (template) + your gitignored `config.local.sh`.
 - **`install/`** — `install-backend.sh` (venv + vllm-mlx + fork patches), `download-models.sh`,
@@ -253,3 +257,63 @@ Re-apply after any `vllm-mlx` reinstall/upgrade: `git -C <vllm-mlx> apply vllm-m
 ## License
 
 MIT © Heiko Brantsch
+
+---
+
+## Local Agent Dispatch
+
+`bin/local-agent-dispatch.py` is a universal local model dispatcher that works independently of any AI
+client — use it from a plain terminal, a shell script, a Claude Code session, an AGY session, or a CI
+pipeline. No cloud account or API key is needed for the dispatched work.
+
+### Shell aliases
+
+Add these to your `~/.zshrc` (or `~/.bashrc`):
+
+```zsh
+_la_bin="/path/to/local-agents/bin/local-agent-dispatch.py"
+alias local-agent="$_la_bin"                                      # default → qwen-3.6-operator
+alias local-agent-qwen="$_la_bin --model qwen-3.6-operator"      # Qwen 3.6 27B operator
+alias local-agent-thinking="$_la_bin --model qwen-3.6-thinking"  # Qwen 3.6 with thinking
+alias local-agent-r1="$_la_bin --model deepseek-r1-architect"    # DeepSeek R1 reasoner
+alias local-agent-scout="$_la_bin --model llama-scout"           # Llama Scout fast/light
+alias local-agent-kimi="$_la_bin --model kimi-vl-thinking"       # Kimi VL multimodal
+alias local-agent-kat="$_la_bin --model kat-coder-optiq"         # KAT Coder OptiQ
+alias local-agent-devstral="$_la_bin --model devstral-2-123b"    # Devstral 2 123B
+alias local-agent-gemma="$_la_bin --model gemma-4-26b"           # Gemma 4 26B
+```
+
+Or create a symlink for shell-agnostic access:
+
+```bash
+ln -sf /path/to/local-agents/bin/local-agent-dispatch.py ~/.local/bin/local-agent
+```
+
+### Usage
+
+```bash
+# Generic (defaults to qwen-3.6-operator):
+local-agent --prompt "What does this module do?" --files src/main.py
+
+# With a specific model:
+local-agent-r1 --prompt "Review this plan and identify architectural risks"
+
+# Multiple files, custom token budget:
+local-agent-devstral --prompt "Refactor the following into clean functions" \
+  --files utils.py helpers.py --max-tokens 2048
+
+# Piping output to a file:
+local-agent-qwen --prompt "Summarize test coverage gaps" --files tests/ > summary.txt
+
+# Inside any AGY or Claude Code session (prefix ! to run locally, zero cloud quota):
+! local-agent-qwen --prompt "First-pass review of this diff" --files my_changes.patch
+```
+
+### Options
+
+| Flag | Default | Description |
+| :--- | :--- | :--- |
+| `--model` | `qwen-3.6-operator` | Model alias from your `config.local.sh` registry |
+| `--prompt` | *(required)* | Task prompt text |
+| `--files` | *(none)* | One or more file paths to inline as context |
+| `--max-tokens` | `4096` | Max tokens the model should generate |
