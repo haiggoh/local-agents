@@ -254,6 +254,62 @@ Re-apply after any `vllm-mlx` reinstall/upgrade: `git -C <vllm-mlx> apply vllm-m
   `LA_API_TIMEOUT_MS` in your config. Complementary lever: fewer tools = smaller prefill = faster turns
   (a lighter MCP set, or start the session with `--strict-mcp-config`).
 
+## Savings ledger — what did offloading actually avoid paying for?
+
+Every local dispatch is work a metered cloud model would otherwise have billed you for.
+`bin/savings-ledger.py` records each one and values the counterfactual:
+
+```sh
+savings-ledger.py record --model qwen-3.6-operator --in 9123 --out 412
+savings-ledger.py report --today          # also --week, --month, --since YYYY-MM-DD, --json
+savings-ledger.py rollup                  # regenerate the derived rollup
+savings-ledger.py rates                   # the rate table and its as-of date
+```
+
+`bin/librarian-dispatch.py` appends an event automatically on every successful dispatch
+(`--no-ledger` opts out, `--priced-against MODEL` picks the comparison rate). Recording is
+best-effort and can never fail a dispatch that already produced output.
+
+**Store** — `~/.claude/local-agents/` (override with `$LOCAL_AGENTS_LEDGER_DIR`), outside the
+plugin so updates never touch your data:
+
+- `savings.jsonl` — append-only, one JSON object per dispatch: timestamp, session, local
+  model, in/out tokens, the cloud model and rates it was priced against, and the saving.
+- `rollup.json` — **derived**, grouped by `(session, UTC day)`. Regenerate it; never hand-edit
+  it. It carries `source_events` so you can tell when it's stale.
+
+### Two things it refuses to do
+
+Both are the same principle: a number that looks real but isn't is worse than a stated gap.
+
+**It never prices an unknown model at zero.** A model missing from the rate table records
+`saved_usd: null` with `rate_source: "unknown"`, and `report` counts those out loud. Zero
+claims the work was free; null says it wasn't valued. (This is not hypothetical — an earlier
+tool here priced `claude-opus-5[1m]` at `0.00` because its table was keyed on bare names.
+Model ids are normalized before lookup: context-window suffixes `[1m]`, provider prefixes
+`anthropic.`, deployment suffixes `-fast`, and dated snapshots all resolve to the catalog name.)
+
+**It never reports a missing prompt-token count as "saved nothing".** Measured on this
+backend: it returns `prompt_tokens: 0` even for a ~21,600-character prompt. Offload savings
+live mostly on the *input* side — large corpus in, short answer out — so a silent zero would
+understate the total by orders of magnitude. Such events are flagged
+`input_tokens_source: "unavailable"` and keep the prompt's raw **character** count (a fact,
+not an estimate), so `report` says the figure is understated and a later pass can price them
+properly:
+
+```text
+local offload (all time): 1 dispatch(es), 0 in / 2 out, saved $0.00
+  ⚠ 1 event(s) counted the OUTPUT side only covering 9,232 unmeasured prompt characters —
+    the server reported no prompt-token count, so the real saving is materially higher
+```
+
+### Rates
+
+The built-in table is a **dated snapshot** (`savings-ledger.py rates` prints its as-of date,
+and every event records which table priced it). Verify against current vendor pricing before
+trusting a large total, and use `--rates-file` to supply your own rather than editing the
+plugin.
+
 ## License
 
 MIT © Heiko Brantsch

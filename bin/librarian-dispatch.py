@@ -81,6 +81,10 @@ def main():
                     help="convenience: model id for --prompt (default: the claude-opus-4-8 spoof all local servers answer to)")
     ap.add_argument("--max-tokens", type=int, default=1024,
                     help="convenience: max_tokens for --prompt (default 1024)")
+    ap.add_argument("--priced-against", default=None,
+                    help="cloud model whose rate values this dispatch in the savings ledger")
+    ap.add_argument("--no-ledger", action="store_true",
+                    help="don't append a savings-ledger event for this dispatch")
     a = ap.parse_args()
 
     if not a.payload and not a.prompt:
@@ -206,7 +210,66 @@ def main():
                "reasoning_tokens": st["rtok"], "reasoning_chars": st["rchars"],
                "usage": usage, "elapsed": elapsed},
               open(os.path.join(a.outdir, "done"), "w"))
+    _record_savings(a, body, usage, st)
     return 0
+
+
+def _record_savings(a, body, usage, st):
+    """Append this dispatch to the local-offload savings ledger (best effort).
+
+    Wrapped in a bare except and gated on --no-ledger: accounting must never be able to
+    fail a dispatch that already succeeded. The work is done and the output is on disk by
+    the time we get here, so a broken ledger should cost you a line of bookkeeping, not
+    the result you were waiting for.
+
+    Prefers the server-reported usage; falls back to the streamed token count when the
+    server didn't send a usage block, and labels which it used so a reader can tell an
+    authoritative count from an estimate.
+
+    ⚠️ MEASURED: this backend reports `prompt_tokens: 0` even for a ~21,600-character
+    prompt, so the input side is routinely missing. That is the side offload savings mostly
+    live on (large corpus in, short answer out), so we do NOT quietly record a zero that
+    reads as "saved nothing". The event is flagged `input_tokens_source: "unavailable"` and
+    carries the prompt's raw CHARACTER count — a fact, not an estimate — so `report` can
+    say the total is understated and a later pass can price it properly.
+    """
+    if a.no_ledger:
+        return
+    try:
+        prompt_chars = sum(len(str(m.get("content") or ""))
+                           for m in (body.get("messages") or [])
+                           if isinstance(m, dict))
+        in_source = "server"
+        if isinstance(usage, dict) and usage.get("completion_tokens") is not None:
+            n_in = int(usage.get("prompt_tokens") or 0)
+            n_out = int(usage.get("completion_tokens") or 0)
+            tool = "librarian-dispatch"
+            # A zero prompt count alongside a non-trivial prompt is the backend's gap, not
+            # a genuinely empty prompt — distinguish the two by looking at the payload.
+            if n_in == 0 and prompt_chars > 0:
+                in_source = "unavailable"
+        else:
+            # No usage block at all: the output count is ours from the stream, and there is
+            # no input count to be had. Record 0 rather than inventing one, and label it.
+            n_in, n_out = 0, int(st.get("ntok") or 0)
+            tool = "librarian-dispatch(estimated)"
+            if prompt_chars > 0:
+                in_source = "unavailable"
+        cmd = [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                            "savings-ledger.py"),
+               "record", "--model", str(body.get("model") or "unknown"),
+               "--in", str(n_in), "--out", str(n_out), "--tool", tool, "--quiet",
+               "--input-tokens-source", in_source]
+        if in_source == "unavailable":
+            cmd += ["--input-chars", str(prompt_chars)]
+        if a.priced_against:
+            cmd += ["--priced-against", a.priced_against]
+        if a.port:
+            cmd += ["--port", str(a.port)]
+        subprocess.run(cmd, timeout=15, stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL, check=False)
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":
