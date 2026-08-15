@@ -322,6 +322,11 @@ MIT © Heiko Brantsch
 client — use it from a plain terminal, a shell script, a Claude Code session, an AGY session, or a CI
 pipeline. No cloud account or API key is needed for the dispatched work.
 
+It is also a terminal-native companion interface for interactive local-agent work outside Claude Code.
+It reuses the same model registry, hotswap layer, and librarian dispatcher as the rest of this repository.
+The current dispatcher development version is `0.9.0.dev0`; it is committed locally but has not yet
+been tagged or published as a standalone release.
+
 ### Shell aliases
 
 Add these to your `~/.zshrc` (or `~/.bashrc`):
@@ -344,6 +349,21 @@ Or create a symlink for shell-agnostic access:
 ```bash
 ln -sf /path/to/local-agents/bin/local-agent-dispatch.py ~/.local/bin/local-agent
 ```
+
+### Conversation mode
+
+Start an interactive terminal conversation:
+
+```bash
+local-agent --convo
+```
+
+Conversation mode supports structured history, model-specific labels,
+compact/verbose/quiet progress, multiline `:paste` / `:end` input, rolling
+summaries, `:file PATH` attachments, and resumable named sessions.
+
+See [`docs/local-agent-dispatch/README.md`](docs/local-agent-dispatch/README.md)
+for the complete dispatcher reference and development notes.
 
 ### Usage
 

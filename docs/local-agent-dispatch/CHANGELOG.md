@@ -2,26 +2,35 @@
 
 All entries below are planned or reconstructed milestones. They are not claims that the corresponding versions were formally released at the historical dates.
 
-## Unreleased — next local-agents release
+## Unreleased — local terminal dispatcher
 
-### Added
+The dispatcher implementation and documentation are committed locally but have
+not yet been tagged or pushed as a public release.
 
-- Introduce `local-agent` as a terminal-native companion interface for the `local-agents` model infrastructure.
-- Document one-shot and interactive conversation workflows.
-- Document structured conversation messages, progress modes, multiline paste, file attachments, rolling summaries, and named sessions.
-- Prepare a dedicated dispatcher README and release documentation.
+### Implemented and tested
+
+- One-shot dispatch.
+- Interactive conversation mode.
+- Structured conversation messages.
+- Compact, verbose, and quiet progress modes.
+- `:paste` / `:end` multiline input.
+- Leading `You>` normalization.
+- Rolling summaries with `:context` and `:summary`.
+- `:file PATH` and attachment-size enforcement.
+- Named-session save/resume with autosave.
+
+### Known follow-up
+
+Rapid clipboard pastes can make terminal input echoes and model output appear
+visually interleaved even though isolated multiline collection succeeds.
 
 ### Planned
 
-- Add automated regression tests for CLI parsing, one-shot dispatch, progress modes, `You>` normalization, multiline input, file limits, rolling summaries, and named-session persistence.
-- Add version metadata and a `--version` option.
-- Add a documented release checklist and reproducible test command.
-- Improve terminal behavior during rapid clipboard pastes so paste-mode status, input collection, and model output cannot appear visually interleaved.
-- Preserve current interactive behavior while making the `:paste` / `:end` state transition clearer.
-
-### Release status
-
-This entry is intentionally unreleased. The repository currently contains uncommitted local-agent WIP and unrelated untracked work. Do not publish or tag this entry until the surrounding repository changes have been reviewed and the release owner approves the complete release set.
+- Improve paste-mode terminal presentation.
+- Add automated regression tests.
+- Finalize release metadata and the documented version source of truth.
+- Add a reproducible smoke-test command.
+- Complete release review before tagging or pushing.
 
 ## v0.9.0 — Named session save and resume
 

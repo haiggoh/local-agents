@@ -147,6 +147,22 @@ It can be installed with the rest of the repository even when users do not invok
 
 ## Development status
 
-The dispatcher is an actively developed pre-1.0 component. Its principal workflows have been tested manually against the local model infrastructure. Automated regression tests, version metadata, and a formal release boundary are planned before the first stabilized `v1.0.0` release.
+The dispatcher is an actively developed pre-1.0 terminal companion.
 
-See the project release plan and changelog for the reconstructed feature history and pending work.
+Current development version:
+
+```text
+0.9.0.dev0
+```
+
+The principal workflows have been tested manually against the local model
+infrastructure and are committed locally for review. This is a development
+checkpoint, not a public dispatcher release or Git tag.
+
+A known follow-up concerns rapid clipboard pastes: isolated `:paste` collection
+works, but terminal input echoes and model output can sometimes appear visually
+interleaved. Automated regression tests, paste-burst UX refinement, and final
+release review remain before the first formal dispatcher release.
+
+See the project release plan and changelog for the reconstructed feature history
+and pending work.

@@ -42,6 +42,8 @@ BIN_DIR = os.path.dirname(os.path.realpath(__file__))
 HOTSWAP_SCRIPT = os.path.join(BIN_DIR, "local-llm-hotswap.sh")
 LIBRARIAN_SCRIPT = os.path.join(BIN_DIR, "librarian-dispatch.py")
 
+__version__ = "0.9.0.dev0"
+
 PROGRESS_MODE = "compact"
 PROGRESS_LABEL = "model"
 SESSION_DIR = os.path.expanduser(
@@ -714,6 +716,12 @@ def main():
     global PROGRESS_MODE, PROGRESS_LABEL
 
     parser = argparse.ArgumentParser(description="AGY Local Model Dispatcher")
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+    )
+
     parser.add_argument(
         "--model",
         default="qwen-3.6-operator",
