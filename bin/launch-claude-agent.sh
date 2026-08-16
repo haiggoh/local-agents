@@ -21,7 +21,11 @@ la_load_config || exit 1
 MODEL_ALIAS="${1:-}"
 EFFORT_OVERRIDE="${2:-}"
 if [ -z "$MODEL_ALIAS" ] || ! la_lookup "$MODEL_ALIAS"; then
-    echo "Usage: $0 <alias> [effort-override]"; echo "Registered aliases:"; la_aliases_help; exit 1
+    echo "Usage: $0 <alias> [effort-override]"; echo "Registered aliases:"; la_aliases_help
+    # Signpost the menu front-end. Without this, the no-argument path told you to go read
+    # a list of aliases while the interactive picker sat one command away, unmentioned.
+    echo; echo "Tip: run '$LAUNCH_DIR/csl' with no arguments to pick from a numbered menu instead."
+    exit 1
 fi
 # spoof_id may be a comma-separated preference list (newest Claude model first). The SERVER
 # answers to all of them; the CLIENT must be handed exactly one, so use the preferred (first).
