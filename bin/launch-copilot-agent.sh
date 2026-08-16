@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 # launch-copilot-agent.sh — start a Copilot CLI session driven by a LOCAL MLX model (BYOK)
-# Usage: launch-copilot-agent.sh <alias> [effort]
+# Usage: launch-copilot-agent.sh <alias>
 # Example: launch-copilot-agent.sh qwen-3.6-operator
+#
+# There is deliberately NO effort argument, unlike launch-claude-agent.sh. This script
+# previously accepted a second "[effort]" parameter, assigned it, and then never used it —
+# so an effort passed here was silently discarded. Copilot CLI exposes no equivalent
+# knob to map it onto, so the parameter was removed rather than faked. If Copilot ever
+# gains one, wire it through here instead of just re-declaring the variable.
 set -uo pipefail
 _s="${BASH_SOURCE[0]}"; while [ -h "$_s" ]; do _d="$(cd -P "$(dirname "$_s")" && pwd)"; _s="$(readlink "$_s")"; case "$_s" in /*) ;; *) _s="$_d/$_s";; esac; done
 LAUNCH_DIR="$(cd -P "$(dirname "$_s")" && pwd)"
@@ -10,9 +16,16 @@ LAUNCH_DIR="$(cd -P "$(dirname "$_s")" && pwd)"
 la_load_config || exit 1
 
 MODEL_ALIAS="${1:-}"
-EFFORT_OVERRIDE="${2:-}"
+# Say so rather than ignoring it, in case someone carries the habit over from
+# launch-claude-agent.sh, which does take an effort override. Checked before the alias
+# lookup so the message appears whether or not the alias itself was valid.
+if [ -n "${2:-}" ]; then
+  echo "⚠️  Ignoring extra argument '$2': this launcher takes no effort parameter." >&2
+fi
 if [ -z "$MODEL_ALIAS" ] || ! la_lookup "$MODEL_ALIAS"; then
-  echo "Usage: $0 <alias> [effort]"; echo "Registered aliases:"; la_aliases_help; exit 1
+  echo "Usage: $0 <alias>"; echo "Registered aliases:"; la_aliases_help
+  echo; echo "Tip: run '$LAUNCH_DIR/csl' with no arguments to pick from a numbered menu instead."
+  exit 1
 fi
 
 # Warm model and get a serving port
