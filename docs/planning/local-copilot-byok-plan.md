@@ -107,11 +107,44 @@ If the pcap shows the client resetting the connection quickly (RST), focus on re
 - [x] Add permissive probe handling: HEAD/OPTIONS, multiple path aliases, fallback model manifest (done in proxy).
 - [ ] Parse pcap and exact Copilot request/response headers to determine schema mismatch.
 - [ ] Implement exact OpenAI model manifest schemas in proxy (complete field parity: id, name, created, owned_by, permission array).
-- [ ] Harden streaming behavior: support chunked responses or SSE if Copilot expects streaming on the wire API.
+- [x] Harden streaming behavior: support chunked responses or SSE if Copilot expects streaming on the wire API. **DONE** — this was the root cause; see the SSE detail under "Current state".
 - [ ] Add full support for /v1/models/<id>/versions and both completions/responses wire APIs.
 - [ ] Add robust Authorization handling and expected status codes (401/403 semantics).
-- [ ] Add an automated end-to-end test and document usage in README (bin/README.md or docs/).
+- [x] Add an automated end-to-end test and document usage in README. **DONE** — the test is
+      `bin/test-copilot-byok-integration.sh` (it landed with the proxy in e0b2843), and the README
+      now carries a "Copilot BYOK — experimental" section.
 - [ ] If required, implement model-id spoofing fallback (set COPILOT_MODEL to a well-known model, COPILOT_PROVIDER_WIRE_MODEL to local alias).
+
+### Effort override for the launcher — REMOVED FROM CODE, STILL WANTED
+
+**Recorded 2026-08-16 so the intent is not lost now that the code is gone.** Released in
+plugin `0.5.1`.
+
+`bin/launch-copilot-agent.sh` used to advertise `Usage: <alias> [effort]`, read the second
+argument into `EFFORT_OVERRIDE`, and then **never use it** — so any effort passed was silently
+discarded. It was almost certainly inherited by copying `bin/launch-claude-agent.sh`, which does
+consume it (`EFFORT="${EFFORT_OVERRIDE:-$LA_CUR_EFFORT}"`). It was the sole cause of the
+repository's `tests/lint.sh` failure (shellcheck `SC2034`).
+
+The parameter was removed rather than suppressed with a `shellcheck disable`, because the finding
+was correct and described a real silent no-op. **Removal is not a decision that the feature is
+unwanted** — it is a decision not to keep advertising one that does nothing. Passing a second
+argument now prints an explicit warning.
+
+- [ ] **Feature task: give the Copilot launcher a real effort override.** Parity with
+      `launch-claude-agent.sh` is the goal: `launch-copilot-agent.sh <alias> [effort]` should
+      actually change how hard the local model works.
+      - **Open question that gates it:** Copilot CLI exposes no effort/reasoning knob that this
+        script can pass through, which is why it could not simply be wired up. So the override
+        has to act on **our** side of the boundary, not Copilot's — most plausibly by selecting a
+        different registry alias or by setting the thinking/effort environment the hotswap layer
+        already understands (`VLLM_MLX_ENABLE_THINKING` and the per-alias effort in the model
+        registry), then serving that to Copilot transparently.
+      - Decide whether "effort" for this path means *a different model tier* or *the same model
+        with thinking toggled*, since the registry supports both and they are not equivalent.
+      - Do not reintroduce the bare `EFFORT_OVERRIDE` declaration to satisfy a usage string; wire
+        it end-to-end or leave it out. A comment in the script says the same thing at the point
+        where someone would be tempted.
 
 ## Recommended immediate next action
 Run one more instrumented Copilot BYOK probe while proxy logging is at debug and capture proxy output. If proxy logs lack sufficient detail, run a short loopback packet capture (tcpdump -i lo0 -w /tmp/copilot-probe.pcap) and share or inspect locally.
