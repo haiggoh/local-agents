@@ -3,8 +3,8 @@
 
 Dispatch a prompt to any registered local MLX model in your local-agents
 stack (vllm-mlx / local-llm-hotswap.sh) from ANY context: terminal, script,
-AGY session, Claude Code session, or CI pipeline. No cloud model or API key
-required for the dispatched work.
+editor or agent session, Claude Code session, or CI pipeline. No cloud model
+or API key required for the dispatched work.
 
 Usage:
     local-agent [--model ALIAS] --prompt "TEXT" [--files F1 F2 ...] [--max-tokens N]
@@ -42,7 +42,7 @@ BIN_DIR = os.path.dirname(os.path.realpath(__file__))
 HOTSWAP_SCRIPT = os.path.join(BIN_DIR, "local-llm-hotswap.sh")
 LIBRARIAN_SCRIPT = os.path.join(BIN_DIR, "librarian-dispatch.py")
 
-__version__ = "0.9.0.dev0"
+__version__ = "0.9.0"
 
 PROGRESS_MODE = "compact"
 PROGRESS_LABEL = "model"
@@ -715,7 +715,9 @@ def autosave_named_session(
 def main():
     global PROGRESS_MODE, PROGRESS_LABEL
 
-    parser = argparse.ArgumentParser(description="AGY Local Model Dispatcher")
+    parser = argparse.ArgumentParser(
+        description="local-agent-dispatch — dispatch a prompt to a local MLX model"
+    )
     parser.add_argument(
         "--version",
         action="version",

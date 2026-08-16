@@ -1,5 +1,31 @@
 # Copilot BYOK — Local Inference Mode
 
+> ## ⚠️ EXPERIMENTAL PROOF OF CONCEPT — NOT A WORKING FEATURE
+>
+> **Status as of 2026-08-16: the intended goal is NOT achieved.** Read this before following any
+> instruction below, because the rest of this document is written as a usage guide and would
+> otherwise imply the feature works.
+>
+> - **What is demonstrated:** the streaming wire format is correct. Toy prompts return completions
+>   through the proxy, and `/v1/models` resolves. That is a *transport-level* result.
+> - **What is NOT demonstrated:** GitHub Copilot actually using a local model as its engine when
+>   cloud quota is exhausted, which was the entire point. In its current state it behaves much like
+>   `bin/local-agent-dispatch.py`, which already exists here — so it does not yet add what it set
+>   out to add.
+> - **It may be a dead end.** The approach depends on `COPILOT_PROVIDER_BASE_URL`,
+>   `COPILOT_PROVIDER_TYPE` and `COPILOT_PROVIDER_API_KEY`. GitHub's published supported-models
+>   documentation lists only vendor-hosted providers and does not mention BYOK, Ollama, self-hosted
+>   servers, or custom OpenAI-compatible endpoints. Those environment variables appear to be
+>   undocumented, so they can change or stop working without notice. Confirm that contract before
+>   investing further.
+> - **No support is offered and it may be removed.** It ships in this repository because it reuses
+>   this repository's model registry, hotswap layer and launcher conventions; keeping it here avoids
+>   maintaining a drifting duplicate of that infrastructure. It is not part of the plugin's supported
+>   surface and nothing in the plugin points users at it.
+>
+> Start by running `bin/test-copilot-byok-integration.sh` and treating its result as the source of
+> truth, not this guide.
+
 Run GitHub Copilot CLI with local Qwen 3.6 inference models instead of cloud compute. This uses Copilot's **BYOK (Bring Your Own Key)** mode to proxy requests through a local HTTP server that forwards to vLLM-MLX.
 
 ## Quick Start

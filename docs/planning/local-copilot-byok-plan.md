@@ -8,10 +8,29 @@
 - Tidied repo: moved planning notes to docs/planning/, moved backups to backups/, updated .gitignore.
 - Verified vllm serves qwen-3.6-operator; local dispatch and curl calls return completions.
 
-## Current state (WORKING ✅)
-- **Copilot BYOK POC is now FULLY FUNCTIONAL!**
-- The proxy successfully handles Copilot CLI requests with local Qwen 3.6 model.
-- Tested with two prompts: "Test probe" and "Write a small hello world function in Python" — both completed successfully.
+## Current state (PROOF OF CONCEPT — the goal is NOT met)
+
+**Status corrected 2026-08-16.** This section previously read "Copilot BYOK POC is now
+FULLY FUNCTIONAL!". That over-claimed, and the correction matters because the earlier
+wording would have shipped a public doc announcing a feature that does not exist.
+
+- **What is actually demonstrated:** the SSE wire format works. Two toy prompts — "Test
+  probe" and "Write a small hello world function in Python" — returned completions, and
+  `/v1/models` plumbing resolves. That is a transport-level result.
+- **What is NOT demonstrated — i.e. the actual goal:** Copilot running local Qwen as its
+  main engine once cloud quota is exhausted. Owner testing on 2026-08-15/16 found the
+  current behaviour lands much closer in function to the existing
+  `bin/local-agent-dispatch.py` than to the intended Copilot-fallback feature. Two toy
+  prompts completing is not the same as a usable daily engine.
+- **Consequence:** the distinguishing value of this work is entirely in the part that is
+  not built yet. In its present form it largely duplicates a tool that already exists here,
+  so it is a POC to finish or drop — not a release candidate.
+- **Dependency risk (unverified, flagged not disproven):** the mechanism rests on
+  `COPILOT_PROVIDER_BASE_URL` / `COPILOT_PROVIDER_TYPE` / `COPILOT_PROVIDER_API_KEY`.
+  GitHub's published supported-models documentation lists only vendor-hosted providers and
+  says nothing about BYOK or custom/local endpoints, so these appear to be undocumented
+  environment variables in a proprietary CLI. Undocumented interfaces can break silently on
+  any Copilot update; confirm the contract before treating this as supportable.
 - The key fix was implementing **proper Server-Sent Events (SSE) streaming format** for chat/completions responses, not raw HTTP chunked encoding.
 - Proxy request audit log shows single requests (no retries) for successful prompts; Copilot logs show `hasError=false` completion.
 
@@ -37,7 +56,17 @@
    - ✅ Format each message chunk as `data: <JSON>\n\n`
    - ✅ Use HTTP/1.1 chunked encoding to frame SSE messages
    - ✅ Properly terminate chunked stream with `0\r\n\r\n`
-4. **[NEXT]** Create automated integration test: script that starts hotswap → proxy → runs `copilot -p "test prompt"` and validates success (exit code 0, no errors in logs).
+4. ~~**[NEXT]** Create automated integration test~~ — **ALREADY DONE, this item was stale.**
+   `bin/test-copilot-byok-integration.sh` exists and landed in the same commit as the proxy
+   (e0b2843). It is a real gate, not a stub: it asserts `SUCCESS_PORT` from hotswap, that the
+   proxy process stays alive, that `/v1/models` actually returns `qwen-3.6-operator`, and then
+   runs a live `copilot -p` probe. Verified present 2026-08-16 by reading it.
+5. **[ACTUAL NEXT]** Decide whether to finish or drop this. To finish, the missing piece is the
+   real goal — Copilot using the local model as a working engine on quota exhaustion, not just
+   a completing toy prompt. Start by running the integration test above and recording what it
+   proves and what it still does not, then confirm whether the `COPILOT_PROVIDER_*` contract is
+   supported at all (see the dependency risk above). If that contract is not supportable, this
+   approach is a dead end regardless of how much polish the proxy gets.
 5. **[OPTIONAL FOLLOW-UP]** Implement model-id spoofing fallback if new issues arise:
    - Set COPILOT_MODEL=gpt-5.4 (well-known model) and COPILOT_PROVIDER_WIRE_MODEL=qwen-3.6-operator (actual local model) to bypass model validation while using local inference.
 

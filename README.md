@@ -46,7 +46,7 @@ approach suppressed them).
 - **`bin/local-llm-hotswap.sh`** — land a registered model on the first free port; safe (never kills
   a healthy model on another port); bounded readiness with diagnostics.
 - **`bin/local-agent-dispatch.py`** — universal local model dispatcher, independent of any AI client
-  (Claude Code, AGY, or none). Shells out to `local-llm-hotswap.sh` + `librarian-dispatch.py` and
+  (Claude Code, another agent CLI, or none). Shells out to `local-llm-hotswap.sh` + `librarian-dispatch.py` and
   streams live tokens back to stdout. Install the shell aliases and symlink with `install/setup-shortcuts.sh`
   (or add them manually — see [Local Agent Dispatch](#local-agent-dispatch) below).
 - **`bin/csl`** — menu front-end built from your configured aliases.
@@ -319,13 +319,14 @@ MIT © Heiko Brantsch
 ## Local Agent Dispatch
 
 `bin/local-agent-dispatch.py` is a universal local model dispatcher that works independently of any AI
-client — use it from a plain terminal, a shell script, a Claude Code session, an AGY session, or a CI
-pipeline. No cloud account or API key is needed for the dispatched work.
+client — use it from a plain terminal, a shell script, a Claude Code session, another agent CLI, or a
+CI pipeline. No cloud account or API key is needed for the dispatched work.
 
 It is also a terminal-native companion interface for interactive local-agent work outside Claude Code.
 It reuses the same model registry, hotswap layer, and librarian dispatcher as the rest of this repository.
-The current dispatcher development version is `0.9.0.dev0`; it is committed locally but has not yet
-been tagged or published as a standalone release.
+The current dispatcher version is `0.9.0`. It is functional and in daily use, with known rough edges
+tracked in `docs/local-agent-dispatch/CHANGELOG.md` — expect fixes in subsequent releases rather than
+a frozen surface.
 
 ### Shell aliases
 
@@ -381,7 +382,7 @@ local-agent-devstral --prompt "Refactor the following into clean functions" \
 # Piping output to a file:
 local-agent-qwen --prompt "Summarize test coverage gaps" --files tests/ > summary.txt
 
-# Inside any AGY or Claude Code session (prefix ! to run locally, zero cloud quota):
+# Inside any agent CLI or Claude Code session (prefix ! to run locally, zero cloud quota):
 ! local-agent-qwen --prompt "First-pass review of this diff" --files my_changes.patch
 ```
 
@@ -393,3 +394,21 @@ local-agent-qwen --prompt "Summarize test coverage gaps" --files tests/ > summar
 | `--prompt` | *(required)* | Task prompt text |
 | `--files` | *(none)* | One or more file paths to inline as context |
 | `--max-tokens` | `4096` | Max tokens the model should generate |
+
+## Copilot BYOK — experimental, not a supported feature
+
+`bin/copilot_local_proxy.py`, `bin/launch-copilot-agent.sh` and
+`bin/test-copilot-byok-integration.sh` are an **unfinished proof of concept**, documented here only
+so that nobody who stumbles across them mistakes them for a working feature.
+
+The aim was to let GitHub Copilot fall back to a local model once cloud quota runs out. **That does
+not work yet.** What is proven is the streaming wire format; what is not proven is Copilot actually
+running on a local engine. In its present state it overlaps `local-agent-dispatch` above, so it adds
+nothing you cannot already do — and it leans on undocumented `COPILOT_PROVIDER_*` environment
+variables that may stop working without warning.
+
+It lives in this repository rather than its own because it reuses the same model registry, hotswap
+layer and launcher conventions as everything else here; splitting it out would mean maintaining a
+second copy of that infrastructure and letting the two drift. Nothing in the plugin points at it, it
+receives no support, and it may be removed. Details and the honest status:
+[`docs/local-copilot-byok/COPILOT-BYOK-README.md`](docs/local-copilot-byok/COPILOT-BYOK-README.md).

@@ -2,10 +2,32 @@
 
 All entries below are planned or reconstructed milestones. They are not claims that the corresponding versions were formally released at the historical dates.
 
-## Unreleased — local terminal dispatcher
+## 0.9.0 — first published release of the terminal dispatcher
 
-The dispatcher implementation and documentation are committed locally but have
-not yet been tagged or pushed as a public release.
+Published as part of plugin release `0.5.0`. The `.dev0` suffix was dropped because
+the code is being released rather than held back; it is functional and in daily use,
+not feature-complete. Known rough edges below are expected to be fixed in later
+releases rather than blocking this one.
+
+### Added in this release
+
+- `tests/test_local_agent_dispatch.py` — framework-free unit tests (47 assertions) for
+  `normalize_user_input`, `validate_session_name` and `model_display_label`, matching the
+  existing `tests/test_savings_ledger.py` style. Mutation-tested: seven injected defects
+  were each caught, so the suite is known to be capable of failing.
+
+### Known rough edges (not fixed in 0.9.0)
+
+- Visual interleaving during rapid clipboard pastes. Isolated `:paste` / `:end`
+  collection has passed manual functional testing; the presentation issue is deliberately
+  left for a separate focused patch.
+- Test coverage reaches three of seventeen top-level functions. Session save/load,
+  `read_files_context` file-size limits, the `:paste` / `:end` conversation collector,
+  history compaction and the model-mismatch refusal are not yet covered.
+- Model aliases are still hardcoded per model rather than routed by role, and the
+  `local-*` / `local-agent-*` command namespaces differ by one infix while doing
+  completely different things (launch a session vs. one-shot dispatch). Both are queued
+  for a naming pass.
 
 ### Implemented and tested
 
