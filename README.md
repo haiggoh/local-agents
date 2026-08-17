@@ -159,14 +159,17 @@ tool). It handles **multiple concurrent sessions** — each local server has its
 session its own transcript.
 
 ```bash
-./bin/local-watch.sh            # list running sessions, active ports, recent transcripts + monitor cmds
-./bin/local-watch.sh --open     # actually OPEN a Terminal watcher window per running session
+./bin/local-watch.sh            # DEFAULT: open a watcher window per running session
+./bin/local-watch.sh --list     # print-only: sessions, ports, transcripts + monitor commands
+./bin/local-watch.sh --open     # explicit form of the default
 ./bin/local-watch.sh --health   # just the per-port vllm-log health monitors
 ./bin/local-watch.sh --mutations# just the transcript mutation/thinking monitors
 ```
 
-`--open` skips the copy-paste step: it starts the watchers itself, one window per running session, so
-watching two at once needs no manual pairing of port to transcript. Which transcript belongs to which
+Running it bare **starts the watchers** — one window per running session, so watching two at once needs
+no manual pairing of port to transcript. Watching a session is the reason you ran the script, so it does
+not require remembering a flag; with nothing running there is nothing to watch, and it falls back to the
+listing instead of doing nothing. `--list` forces print-only. Which transcript belongs to which
 session is **correlated, not guessed** — the launcher's `claude` child holds the `.jsonl` open, so
 `lsof` names it exactly. (Sorting transcripts by mtime picks whichever session wrote last, which from a
 supervising cloud session is usually that session's own transcript.)

@@ -14,20 +14,30 @@
 # them in a terminal). This script only DISCOVERS + PRINTS; it does not start anything.
 #
 # Usage:
-#   local-watch.sh              # list running local sessions, active ports, recent transcripts + cmds
+#   local-watch.sh              # DEFAULT: open a watcher window per running local session (engine
+#                               # health for its port + mutations for its transcript). With several
+#                               # sessions running you get one per session, so watching two at once
+#                               # needs no manual bookkeeping. If NOTHING is running there is nothing
+#                               # to watch, so it falls back to the listing below rather than doing
+#                               # nothing — "watch my session" is the reason you ran this, and it
+#                               # should not require remembering a flag.
+#   local-watch.sh --list       # print-only: sessions, active ports, transcripts + monitor commands
+#   local-watch.sh --open       # force the open behaviour (explicit form of the default)
 #   local-watch.sh --health     # only the vllm-log health monitor command(s), one per active port
 #   local-watch.sh --mutations  # only the transcript mutation/thinking monitor command(s)
-#   local-watch.sh --open       # actually OPEN a Terminal window per running local session (two panes'
-#                               # worth: engine health for its port + mutations for its transcript).
-#                               # With several sessions running you get a set per session, so watching
-#                               # two at once needs no manual bookkeeping.
 set -uo pipefail
 _s="${BASH_SOURCE[0]}"; while [ -h "$_s" ]; do _d="$(cd -P "$(dirname "$_s")" && pwd)"; _s="$(readlink "$_s")"; case "$_s" in /*) ;; *) _s="$_d/$_s";; esac; done
 BIN_DIR="$(cd -P "$(dirname "$_s")" && pwd)"
 # shellcheck source=/dev/null
 . "$BIN_DIR/../config/config-lib.sh"; la_load_config || exit 1
 LOGDIR="$HOME/.claude/logs"; PROJ="$HOME/.claude/projects"
-MODE="${1:-list}"
+MODE="${1:-}"
+# Bare invocation means "watch what's running". Resolve that to --open when there IS something to
+# watch, and to the listing when there isn't, so the useful thing happens without a remembered flag.
+if [ -z "$MODE" ]; then
+  if pgrep -f "launch-claude-agent.sh" >/dev/null 2>&1; then MODE="--open"; else MODE="list"; fi
+fi
+[ "$MODE" = "--list" ] && MODE="list"
 
 _health_cmd() {  # $1=port
   # Includes the KV-cache / prefill / throughput lines: for an OPERATOR (thinking off) these are the
@@ -44,9 +54,16 @@ _transcript_for_pid() {  # $1 = pid of a claude process
   lsof -p "$1" 2>/dev/null | grep -o "$PROJ/[^ ]*\.jsonl" | head -1
 }
 _launcher_sessions() {   # -> "pid<TAB>alias" per running launcher
+  # The alias is the argument AFTER the script path — NOT the last field. csl launches presets as
+  # `launch-claude-agent.sh <alias> <effort>`, so $NF is the effort override on every menu-started
+  # session, which would then miss the sessions log and fall back to the wrong port.
   pgrep -fl "launch-claude-agent.sh" 2>/dev/null \
     | grep -v "pgrep\|local-watch" \
-    | awk '{pid=$1; alias=$NF; print pid "\t" alias}'
+    | awk '{
+        pid=$1; alias="";
+        for (i=2; i<=NF; i++) if ($i ~ /launch-claude-agent\.sh$/) { if (i+1<=NF) alias=$(i+1); break }
+        if (alias != "") print pid "\t" alias
+      }'
 }
 _mut_cmd() {     # $1=transcript path
   printf "tail -n0 -f %s | grep --line-buffered -E '\"type\":\"thinking\"|\"name\":\"(Bash|Edit|Write|NotebookEdit)\"|git (commit|push)|waypoints\\.py (done|edit|add)|installed_plugins|marketplace|rm -|mv '\n" "$1"
