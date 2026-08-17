@@ -80,6 +80,24 @@ export API_FORCE_IDLE_TIMEOUT=0
 
 echo "🔗 Direct local channel → $ANTHROPIC_BASE_URL  (model: ${MODEL_SPOOF}, effort: ${EFFORT})"
 
+# --- prompt weight: keep the tool surface off the local model's prefill path -------------------
+# The dominant cost of a local interactive turn is PREFILL, and tool definitions dominate the
+# prompt. --strict-mcp-config drops the configured MCP servers' tools (measured on this stack:
+# 99 -> 28 defs, ~46.9k -> ~23.9k tokens). Announce the choice either way: a silently missing MCP
+# tool would look like a broken session instead of a deliberate speed trade.
+STRICT_FLAG=""
+case "${LA_STRICT_MCP:-true}" in
+    true|1|yes)
+        STRICT_FLAG="--strict-mcp-config"
+        echo "🪶 Lean prompt: MCP servers excluded (--strict-mcp-config) — ~23k fewer prefill tokens/turn."
+        echo "   MCP tools are NOT available in this session. Set LA_STRICT_MCP=false in your config to keep them."
+        ;;
+    *)
+        echo "🐢 MCP servers included (LA_STRICT_MCP=false) — their tool definitions add ~23k tokens the"
+        echo "   local model must prefill. Expect slower turns than a lean session."
+        ;;
+esac
+
 # Local-model behavior nudge (delivered via --append-system-prompt). Targets concrete failure modes
 # seen in fully-local sessions: printing commands instead of using tools, self-identity confusion,
 # reasoning-markup leakage, and — critically — a local session killing its OWN server port.
@@ -96,4 +114,4 @@ echo "🧭 Session engine: $MODEL_ALIAS  (direct; logged to ~/.claude/logs/local
 # --permission-mode acceptEdits (NOT auto): auto mode uses the session model as a tool-safety
 # CLASSIFIER, but the local spoofed model can't serve that call, so auto loops on "temporarily
 # unavailable". acceptEdits uses static rules (edits auto-apply, other tools prompt).
-claude --model "$MODEL_SPOOF" $EFFORT_FLAG --permission-mode acceptEdits --append-system-prompt "$AGENT_PROMPT"
+claude --model "$MODEL_SPOOF" $EFFORT_FLAG $STRICT_FLAG --permission-mode acceptEdits --append-system-prompt "$AGENT_PROMPT"

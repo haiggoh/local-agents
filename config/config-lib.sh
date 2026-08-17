@@ -99,6 +99,18 @@ la_load_config() {
   # heavy prompt (big prefill × many tools can exceed it, then retry-loop into a "Request timed out").
   # Give local sessions generous headroom. (Max is 2147483647; stay well under.)
   : "${LA_API_TIMEOUT_MS:=1800000}"   # 30 min per request for local sessions
+  # Exclude configured MCP servers from local interactive sessions (--strict-mcp-config).
+  # MCP tool DEFINITIONS are the single largest slice of a local session's prompt, and the local
+  # model must prefill them. Measured on this stack (2026-08-17, `claude -p` payload intercepted):
+  #
+  #   default   99 tool defs  173,558 chars (~46.9k tok)  ← 68% of a 254k-char request
+  #   strict    28 tool defs   88,585 chars (~23.9k tok)  ← 71 fewer tools, ~23k tok saved (-33%)
+  #
+  # A 27B local model prefills that on every cache miss (fresh session, or any prefix change), so the
+  # default is ON: local sessions run lean. Set LA_STRICT_MCP=false in your config to keep MCP tools
+  # available to local sessions at that prefill cost. The launcher always PRINTS which mode it used,
+  # so a missing MCP tool is explainable rather than mysteriously absent.
+  : "${LA_STRICT_MCP:=true}"
   # Optional per-machine extras a user may want the agent prompt to know about (all optional):
   : "${LA_MEMORY_DIR:=}"          # absolute path to your auto-memory dir, if you want the agent told
   : "${LA_COUNCIL_NOTE:=}"        # optional extra line appended to the agent prompt (e.g. a council rule)

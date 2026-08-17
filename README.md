@@ -246,13 +246,35 @@ Re-apply after any `vllm-mlx` reinstall/upgrade: `git -C <vllm-mlx> apply vllm-m
 - **HF downloads hang** — some networks black-hole the CDN's IPv6; force IPv4 or switch networks.
 - **Direct request 500s "System message must be at the beginning"** — the fork patch isn't applied;
   re-apply `vllm-mlx-local-fork-patches.patch`.
-- **Interactive turns are slow** — expected for large local models; prefer dispatch for focused work.
+- **Interactive turns are slow** — the cost is *prefill*, not generation, and the prompt is mostly
+  tool definitions. Measured on this stack (2026-08-17, the real `claude -p` payload intercepted):
+
+  | component | chars | ~tokens | share |
+  |---|---:|---:|---:|
+  | built-in tool definitions (31) | 90,734 | 24.5k | 36% |
+  | MCP tool definitions (68 across 3 servers) | 82,824 | 22.4k | 33% |
+  | system prompt | 11,194 | 3.0k | 4% |
+  | per-turn context re-injection (project instructions, memory index, hook banners) | 73,153 | 19.8k | 29% |
+  | **total first-turn prefill** | **254,045** | **68.7k** | |
+
+  The single heaviest definition is one tool at ~5.9k tokens — more than the whole system prompt.
+  Two consequences: the launcher now defaults to `--strict-mcp-config` (`LA_STRICT_MCP`), which removes
+  71 tool definitions and ~23k prefill tokens; and the remaining per-turn cost is the ~20k-token context
+  block, which the server log confirms is re-prefilled on **every** turn even on a cache hit
+  (`cache HIT: reusing 62223 cached tokens` followed by `prefilling 19357 new tokens`). Dispatch sends
+  a prompt three orders of magnitude smaller, which is the whole reason it feels instant — prefer it
+  for focused work.
+- **A tool is missing in a local session** — `LA_STRICT_MCP` defaults to `true`, so MCP-provided tools
+  are deliberately absent (the launcher prints this at startup). Set `LA_STRICT_MCP=false` to restore
+  them, accepting ~23k more prefill tokens per cache miss.
+- **`--allowedTools` does not make a session faster** — it filters what may run, not what is *sent*;
+  the definitions still occupy the prompt. Measured: restricting to 8 tools left the payload unchanged.
 - **"Request timed out" mid-session / a heavy turn never completes** — Claude Code's `API_TIMEOUT_MS`
   defaults to 600000 (10 min) and it also aborts a stream after 5 min with no bytes; a local model doing
   a big prefill over many tools can exceed both. The launcher relaxes them for local sessions
   (`API_TIMEOUT_MS` = `LA_API_TIMEOUT_MS`, default 30 min; `API_FORCE_IDLE_TIMEOUT=0`). Tune
-  `LA_API_TIMEOUT_MS` in your config. Complementary lever: fewer tools = smaller prefill = faster turns
-  (a lighter MCP set, or start the session with `--strict-mcp-config`).
+  `LA_API_TIMEOUT_MS` in your config. See the prefill table above for what is actually consuming the
+  time — the `LA_STRICT_MCP` default already removes the largest avoidable slice.
 
 ## Savings ledger — what did offloading actually avoid paying for?
 
