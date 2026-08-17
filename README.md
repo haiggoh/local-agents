@@ -269,6 +269,23 @@ Re-apply after any `vllm-mlx` reinstall/upgrade: `git -C <vllm-mlx> apply vllm-m
   them, accepting ~23k more prefill tokens per cache miss.
 - **`--allowedTools` does not make a session faster** — it filters what may run, not what is *sent*;
   the definitions still occupy the prompt. Measured: restricting to 8 tools left the payload unchanged.
+- **★ Every turn seems to take two or three times longer than the model needs** — check the port's log
+  for this signature:
+
+  ```
+  [disconnect_guard] START poll=0.5s heartbeat=5.0s timeout=300s
+  [disconnect_guard] TIMEOUT after 300s, 2 chunks, 60 heartbeats
+  [REQUEST] POST /v1/messages (anthropic) stream=False ...   <- same turn, retried
+  Anthropic messages: 202 tokens in 220.76s (0.9 tok/s)
+  ```
+
+  `vllm-mlx serve` caps every request at **300s by default** and its streaming guard enforces that
+  *server-side*, so relaxing Claude Code's client timeouts does nothing: at ~0.9 tok/s an ordinary turn
+  exceeds 5 minutes, the server kills the stream, and the client re-runs the whole turn non-streamed.
+  You pay 300 wasted seconds before the attempt that actually answers. `hotswap` now passes
+  `--timeout $LA_SERVER_TIMEOUT_S` (default 1800). **Serve flags are fixed at launch**, so a server
+  started before this change keeps the 300s cap — hotswap detects that on the reuse path and tells you
+  to restart it rather than silently handing back a warm-but-broken server.
 - **"Request timed out" mid-session / a heavy turn never completes** — Claude Code's `API_TIMEOUT_MS`
   defaults to 600000 (10 min) and it also aborts a stream after 5 min with no bytes; a local model doing
   a big prefill over many tools can exceed both. The launcher relaxes them for local sessions

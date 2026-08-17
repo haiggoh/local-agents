@@ -25,6 +25,10 @@ LA_MAX_MODEL_LEN=32768
 LA_API_TIMEOUT_MS=1800000              # per-request timeout for local sessions (ms). Claude Code's
                                        # default is 600000 (10 min) — too strict for a slow local model
                                        # on a heavy prompt. 30 min gives headroom. (max 2147483647)
+LA_SERVER_TIMEOUT_S=1800               # passed to `vllm-mlx serve --timeout`. vllm-mlx's own default is
+                                       # 300s and its streaming guard enforces it SERVER-side, so a local
+                                       # model that needs >5 min per turn gets its stream killed and the
+                                       # client retries the whole turn. Defaults to LA_API_TIMEOUT_MS/1000.
 LA_STRICT_MCP=true                     # run local interactive sessions with --strict-mcp-config, so the
                                        # configured MCP servers' tool definitions stay out of the prompt.
                                        # Measured: 99 -> 28 tool defs, ~46.9k -> ~23.9k prefill tokens.

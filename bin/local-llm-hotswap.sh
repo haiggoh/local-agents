@@ -75,7 +75,25 @@ for ((port=LA_PORT_START; port<=LA_PORT_MAX; port++)); do
         elif printf '%s\n' "$CURRENT_IDS" | grep -qxF "$MODEL_NAME" || printf '%s\n' "$CURRENT_IDS" | grep -qxF "$MODEL_DIR"; then
             # Match the DISTINCT alias/dir id (served alongside the shared spoof) so tiers sharing a
             # spoof don't wrongly reuse each other's server.
-            echo "✅ $MODEL_NAME already healthy on port $port."; echo "SUCCESS_PORT=$port"; exit 0
+            echo "✅ $MODEL_NAME already healthy on port $port."
+            # Reuse is a speed win but it silently inherits the OLD process's flags: a server started
+            # before --timeout was set keeps vllm-mlx's 300s default and will keep killing streaming
+            # turns mid-generation. Serve flags are fixed at launch, so the only fix is a restart —
+            # say so instead of letting a warm-but-wrong server look like a healthy one.
+            # Resolve the listener's PID here: TARGET_PID is only set on the zombie-reclaim path, so
+            # reading it directly would report "no --timeout" for every healthy server.
+            _pid=$(lsof -t -i ":$port" -sTCP:LISTEN 2>/dev/null | head -1)
+            _rt=$(ps -o command= -p "${_pid:-0}" 2>/dev/null | grep -o -- "--timeout [0-9.]*" | awk '{print $2}')
+            if [ -n "$_rt" ] && [ "${_rt%%.*}" -lt "$LA_SERVER_TIMEOUT_S" ] 2>/dev/null; then
+                echo "⚠️  That server runs --timeout ${_rt}s, below this config's ${LA_SERVER_TIMEOUT_S}s."
+                echo "    Streaming turns longer than ${_rt}s get killed server-side and retried."
+                echo "    Restart it to pick up the current setting:  kill $_pid  (then relaunch)"
+            elif [ -z "$_rt" ]; then
+                echo "⚠️  That server was started without --timeout, so it uses vllm-mlx's 300s default:"
+                echo "    any streaming turn over 5 min is killed server-side, then retried from scratch."
+                echo "    Restart it to pick up ${LA_SERVER_TIMEOUT_S}s:  kill ${_pid:-<pid on port $port>}  (then relaunch)"
+            fi
+            echo "SUCCESS_PORT=$port"; exit 0
         fi
         echo "ℹ️ Port $port busy serving '$CURRENT_MODEL'. Skipping..."
     else TARGET_PORT=$port; break; fi
@@ -123,7 +141,16 @@ SPOOF_PRIMARY="${SPOOF_NAME%%,*}"          # first = preferred; what wait_ready 
   done
 } > "$TMP_CONFIG"
 
-EXTRA_ARGS="--enable-auto-tool-choice --tool-call-parser $TOOLP"
+# --timeout: vllm-mlx's own per-request cap, default 300s. Its streaming disconnect_guard enforces it
+# SERVER-side, so relaxing Claude Code's client timeouts (API_TIMEOUT_MS) does not help: a local model
+# generating at ~0.9 tok/s routinely needs longer than 5 minutes, and the server kills the stream
+# mid-turn. Observed signature in vllm_<PORT>.log — every streaming turn of a real session:
+#   [disconnect_guard] START poll=0.5s heartbeat=5.0s timeout=300s
+#   [disconnect_guard] TIMEOUT after 300s, 2 chunks, 60 heartbeats
+# followed by Claude Code retrying the SAME turn non-streamed, which then succeeds in ~220-280s. The
+# turn is therefore paid for TWICE (~300s thrown away before the attempt that counts). Keep the server
+# cap in step with the client's so whichever fires is a real timeout, not a self-inflicted retry.
+EXTRA_ARGS="--enable-auto-tool-choice --tool-call-parser $TOOLP --timeout $LA_SERVER_TIMEOUT_S"
 [ -n "$REASONP" ] && EXTRA_ARGS="$EXTRA_ARGS --reasoning-parser $REASONP --default-temperature 0.6 --default-top-p 0.95"
 export VLLM_MLX_ENABLE_THINKING="${VLLM_MLX_ENABLE_THINKING:-$THINK}"
 

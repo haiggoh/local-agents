@@ -20,10 +20,21 @@ la_load_config || exit 1
 
 MODEL_ALIAS="${1:-}"
 EFFORT_OVERRIDE="${2:-}"
+
+# No alias at all -> hand off to the numbered picker rather than dead-ending on a usage message.
+# Running the launcher bare is how you say "I want a local session" without having decided which;
+# printing a list of aliases and exiting 1 made the user re-type a command to answer that. csl IS
+# the answer, so go there. (A WRONG alias still gets usage + the registered list — that's a typo,
+# and naming the valid aliases is the useful reply.)
+# LA_MENU_REDIRECT breaks the cycle: csl execs back into this script, so without a one-shot guard a
+# csl that ever handed back an empty alias would fork-bomb between the two.
+if [ -z "$MODEL_ALIAS" ] && [ -z "${LA_MENU_REDIRECT:-}" ] && [ -x "$LAUNCH_DIR/csl" ]; then
+    export LA_MENU_REDIRECT=1
+    exec "$LAUNCH_DIR/csl"
+fi
 if [ -z "$MODEL_ALIAS" ] || ! la_lookup "$MODEL_ALIAS"; then
     echo "Usage: $0 <alias> [effort-override]"; echo "Registered aliases:"; la_aliases_help
-    # Signpost the menu front-end. Without this, the no-argument path told you to go read
-    # a list of aliases while the interactive picker sat one command away, unmentioned.
+    # Signpost the menu front-end for the bad-alias path (the no-arg path goes there automatically).
     echo; echo "Tip: run '$LAUNCH_DIR/csl' with no arguments to pick from a numbered menu instead."
     exit 1
 fi

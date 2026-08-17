@@ -111,6 +111,11 @@ la_load_config() {
   # available to local sessions at that prefill cost. The launcher always PRINTS which mode it used,
   # so a missing MCP tool is explainable rather than mysteriously absent.
   : "${LA_STRICT_MCP:=true}"
+  # Server-side per-request cap passed to `vllm-mlx serve --timeout` (seconds). Its default is 300,
+  # which a local model at ~0.9 tok/s exceeds on ordinary turns — the server then kills the stream and
+  # the client retries the whole turn, so 300s of work is discarded before the attempt that succeeds.
+  # Derived from LA_API_TIMEOUT_MS so the server and client caps stay in step by default.
+  : "${LA_SERVER_TIMEOUT_S:=$(( LA_API_TIMEOUT_MS / 1000 ))}"
   # Optional per-machine extras a user may want the agent prompt to know about (all optional):
   : "${LA_MEMORY_DIR:=}"          # absolute path to your auto-memory dir, if you want the agent told
   : "${LA_COUNCIL_NOTE:=}"        # optional extra line appended to the agent prompt (e.g. a council rule)
