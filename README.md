@@ -160,13 +160,25 @@ session its own transcript.
 
 ```bash
 ./bin/local-watch.sh            # list running sessions, active ports, recent transcripts + monitor cmds
+./bin/local-watch.sh --open     # actually OPEN a Terminal watcher window per running session
 ./bin/local-watch.sh --health   # just the per-port vllm-log health monitors
 ./bin/local-watch.sh --mutations# just the transcript mutation/thinking monitors
 ```
 
+`--open` skips the copy-paste step: it starts the watchers itself, one window per running session, so
+watching two at once needs no manual pairing of port to transcript. Which transcript belongs to which
+session is **correlated, not guessed** — the launcher's `claude` child holds the `.jsonl` open, so
+`lsof` names it exactly. (Sorting transcripts by mtime picks whichever session wrote last, which from a
+supervising cloud session is usually that session's own transcript.)
+
 - **Health / turns / timeouts / stalls** → `~/.claude/logs/vllm_<PORT>.log` (one server = one log, so N
   concurrent servers are unambiguous). Filter to `[REQUEST]`/`CLEANUP done`/timeout/error/disconnect;
   drop the 5-second `disconnect_guard poll` heartbeats.
+- **★ Where a long turn actually is, for a model with thinking OFF** → the same log's KV-cache lines,
+  now included in the health filter. `cache MISS`/`prefilling N new tokens` means it is still *reading*
+  the prompt and has produced nothing yet; `N tokens in Ts (X tok/s)` is the only place the real
+  generation rate appears. For an operator alias this is the substitute for watching reasoning: you
+  cannot see it think, but you can see which phase it is in and whether it is moving.
 - **Mutations + reasoning** → the session's native transcript `.jsonl`: `tool_use` records
   (Bash/Edit/Write/git/waypoints…) and `type:"thinking"` blocks.
 - **Post-hoc chain-of-thought** → `bin/thinking-log.py --latest --local-only` (extracts the reasoning
@@ -257,13 +269,30 @@ Re-apply after any `vllm-mlx` reinstall/upgrade: `git -C <vllm-mlx> apply vllm-m
   | per-turn context re-injection (project instructions, memory index, hook banners) | 73,153 | 19.8k | 29% |
   | **total first-turn prefill** | **254,045** | **68.7k** | |
 
-  The single heaviest definition is one tool at ~5.9k tokens — more than the whole system prompt.
-  Two consequences: the launcher now defaults to `--strict-mcp-config` (`LA_STRICT_MCP`), which removes
-  71 tool definitions and ~23k prefill tokens; and the remaining per-turn cost is the ~20k-token context
-  block, which the server log confirms is re-prefilled on **every** turn even on a cache hit
-  (`cache HIT: reusing 62223 cached tokens` followed by `prefilling 19357 new tokens`). Dispatch sends
-  a prompt three orders of magnitude smaller, which is the whole reason it feels instant — prefer it
-  for focused work.
+  The single heaviest definition is `Workflow` at 21,865 chars (~5.9k tokens) — more than the whole
+  system prompt, for a tool a local model will never drive. The launcher therefore ships two levers,
+  and their combined effect is measured, not estimated:
+
+  | configuration | tool defs | request | ~tokens |
+  |---|---:|---:|---:|
+  | default (what a plain `claude` sends) | 99 | 254,045 chars | 68.7k |
+  | `--strict-mcp-config` (`LA_STRICT_MCP`) | 28 | 173,729 chars | 47.0k |
+  | **+ `--disallowedTools` (`LA_DENY_TOOLS`) — the shipped default** | **15** | **83,903 chars** | **22.7k** |
+
+  That is **−67% of the request** and −86% of the tool weight. The key asymmetry: `--disallowedTools`
+  removes a definition from the *payload*, while `--allowedTools` only filters what may *run* and leaves
+  every definition in the prompt (measured: restricting to 8 tools left the payload unchanged). So the
+  deny-list is a real lever and the allow-list is not.
+
+  What remains is the ~13–20k-token context block, re-prefilled on **every** turn even on a cache hit
+  (`cache HIT: reusing 62223 cached tokens` followed by `prefilling 19357 new tokens`). Dispatch sends a
+  prompt three orders of magnitude smaller, which is why it feels instant — prefer it for focused work.
+- **`Glob` / `Grep` are not missing — this Claude Code build has no such tools.** Its built-in set is 28
+  tools (`Bash`, `Read`, `Edit`, `Write`, `Skill`, `Task*`, `Web*`, …); file search goes through `Bash`.
+  A local session is therefore no worse equipped than a cloud one. This mattered because the launcher's
+  own agent prompt used to instruct the model to "use Glob/LS instead of ls/find, Grep instead of grep" —
+  naming three tools it could not see, which wastes a local model's reasoning on tools that will never
+  appear. The prompt now tells it to use only what is in its actual tool list.
 - **A tool is missing in a local session** — `LA_STRICT_MCP` defaults to `true`, so MCP-provided tools
   are deliberately absent (the launcher prints this at startup). Set `LA_STRICT_MCP=false` to restore
   them, accepting ~23k more prefill tokens per cache miss.

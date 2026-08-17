@@ -22,13 +22,26 @@ LA_MAX_OUTPUT_TOKENS=8192              # native Claude Code output cap for local
 LA_MEMORY_BUDGET_GB=96                 # vllm-mlx per-model memory budget (tune to your RAM)
 LA_ADMISSION="wait"                    # SimpleEngine admission: wait (queue) | fail_fast
 LA_MAX_MODEL_LEN=32768
-LA_API_TIMEOUT_MS=1800000              # per-request timeout for local sessions (ms). Claude Code's
+LA_API_TIMEOUT_MS=3600000              # per-request timeout for local sessions (ms). Claude Code’s
                                        # default is 600000 (10 min) — too strict for a slow local model
-                                       # on a heavy prompt. 30 min gives headroom. (max 2147483647)
-LA_SERVER_TIMEOUT_S=1800               # passed to `vllm-mlx serve --timeout`. vllm-mlx's own default is
+                                       # on a heavy prompt. At the ~0.9 tok/s measured on this stack,
+                                       # LA_MAX_OUTPUT_TOKENS=8192 is ~2.5h of generation, so even 60
+                                       # min can truncate a maximal turn; use 10800000 (3h) if you want
+                                       # a cap that never can. (max 2147483647)
+LA_SERVER_TIMEOUT_S=3600               # passed to `vllm-mlx serve --timeout`. vllm-mlx's own default is
                                        # 300s and its streaming guard enforces it SERVER-side, so a local
                                        # model that needs >5 min per turn gets its stream killed and the
                                        # client retries the whole turn. Defaults to LA_API_TIMEOUT_MS/1000.
+LA_DENY_TOOLS="Workflow,DesignSync,Artifact,Agent,SendMessage,ListAgents,Monitor,ScheduleWakeup,CronCreate,CronList,CronDelete,EnterWorktree,ExitWorktree,ReportFindings"
+                                       # built-in tools withheld from local sessions via
+                                       # --disallowedTools, which (unlike --allowedTools) drops the
+                                       # DEFINITION from the prompt. With LA_STRICT_MCP this takes the
+                                       # request from 254,045 to 83,903 chars (~68.7k -> ~22.7k tok).
+                                       # Each is unusable locally or contrary to this stack; see
+                                       # config-lib.sh for the per-tool reasoning. Empty = send all.
+LA_MCP_CONFIG=""                       # optional JSON naming the ONLY MCP servers to load. Composes
+                                       # with LA_STRICT_MCP=true, so you can keep one cheap server
+                                       # instead of choosing between all of them and none.
 LA_STRICT_MCP=true                     # run local interactive sessions with --strict-mcp-config, so the
                                        # configured MCP servers' tool definitions stay out of the prompt.
                                        # Measured: 99 -> 28 tool defs, ~46.9k -> ~23.9k prefill tokens.

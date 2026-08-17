@@ -17,6 +17,10 @@
 #   local-watch.sh              # list running local sessions, active ports, recent transcripts + cmds
 #   local-watch.sh --health     # only the vllm-log health monitor command(s), one per active port
 #   local-watch.sh --mutations  # only the transcript mutation/thinking monitor command(s)
+#   local-watch.sh --open       # actually OPEN a Terminal window per running local session (two panes'
+#                               # worth: engine health for its port + mutations for its transcript).
+#                               # With several sessions running you get a set per session, so watching
+#                               # two at once needs no manual bookkeeping.
 set -uo pipefail
 _s="${BASH_SOURCE[0]}"; while [ -h "$_s" ]; do _d="$(cd -P "$(dirname "$_s")" && pwd)"; _s="$(readlink "$_s")"; case "$_s" in /*) ;; *) _s="$_d/$_s";; esac; done
 BIN_DIR="$(cd -P "$(dirname "$_s")" && pwd)"
@@ -26,7 +30,23 @@ LOGDIR="$HOME/.claude/logs"; PROJ="$HOME/.claude/projects"
 MODE="${1:-list}"
 
 _health_cmd() {  # $1=port
-  printf "tail -n0 -f %s/vllm_%s.log | grep --line-buffered -E '\\[REQUEST\\]|last user message preview|CLEANUP done|timed out|timeout|Error|Traceback|Killed|OOM|Exception|EngineBusy|CLIENT DISCONNECTED' | grep --line-buffered -vE 'disconnect_guard poll'\n" "$LOGDIR" "$1"
+  # Includes the KV-cache / prefill / throughput lines: for an OPERATOR (thinking off) these are the
+  # substitute for watching reasoning. They tell you which phase a long turn is in — 'cache MISS' or
+  # 'prefilling N new tokens' means it is still reading the prompt and has generated nothing yet,
+  # while 'N tokens in Ts (X tok/s)' is the only place the real generation rate appears.
+  printf "tail -n0 -f %s/vllm_%s.log | grep --line-buffered -E '\\[REQUEST\\]|last user message preview|cache (HIT|MISS|SKIP)|prefilling|tokens in .*tok/s|CLEANUP done|TIMEOUT after|timed out|timeout|Error|Traceback|Killed|OOM|Exception|EngineBusy|CLIENT DISCONNECTED' | grep --line-buffered -vE 'disconnect_guard poll'\n" "$LOGDIR" "$1"
+}
+# Which transcript is a given local session actually writing? Correlate instead of guessing: the
+# launcher's `claude` child holds the .jsonl open, so lsof names it exactly. Beats sorting by mtime,
+# which picks whichever session wrote last — often the wrong one when two are running (and, from a
+# supervising cloud session, usually that session's own transcript).
+_transcript_for_pid() {  # $1 = pid of a claude process
+  lsof -p "$1" 2>/dev/null | grep -o "$PROJ/[^ ]*\.jsonl" | head -1
+}
+_launcher_sessions() {   # -> "pid<TAB>alias" per running launcher
+  pgrep -fl "launch-claude-agent.sh" 2>/dev/null \
+    | grep -v "pgrep\|local-watch" \
+    | awk '{pid=$1; alias=$NF; print pid "\t" alias}'
 }
 _mut_cmd() {     # $1=transcript path
   printf "tail -n0 -f %s | grep --line-buffered -E '\"type\":\"thinking\"|\"name\":\"(Bash|Edit|Write|NotebookEdit)\"|git (commit|push)|waypoints\\.py (done|edit|add)|installed_plugins|marketplace|rm -|mv '\n" "$1"
@@ -42,10 +62,62 @@ _model_on() {    # $1=port → the non-spoof model id served (best-effort)
     | grep -o '"id":"[^"]*"' | cut -d'"' -f4 | grep -v '^claude-' | head -1
 }
 
+# --open: stop printing commands for the user to paste and just start the watchers. One Terminal
+# window per running session, so N concurrent sessions need no manual pairing of port to transcript.
+if [ "$MODE" = "--open" ]; then
+  _n=0
+  while IFS="$(printf '\t')" read -r _pid _alias; do
+    [ -n "${_pid:-}" ] || continue
+    _cpid=$(pgrep -P "$_pid" 2>/dev/null | head -1)
+    _tr=""; [ -n "$_cpid" ] && _tr=$(_transcript_for_pid "$_cpid")
+    [ -z "$_tr" ] && _tr=$(_transcript_for_pid "$_pid")
+    # The port this session talks to is recorded by the launcher at startup; last line for this alias.
+    _port=$(grep "alias=$_alias " "$HOME/.claude/logs/local-agents-sessions.log" 2>/dev/null \
+            | tail -1 | grep -o "vllm_port=[0-9]*" | cut -d= -f2)
+    [ -z "$_port" ] && _port="$LA_PORT_START"
+    _cmd="echo '=== local-watch: $_alias (pid $_pid, port $_port) ==='; $(_health_cmd "$_port")"
+    [ -n "$_tr" ] && _cmd="$_cmd & $(_mut_cmd "$_tr"); wait"
+    osascript >/dev/null 2>&1 <<OSA
+tell application "Terminal"
+  activate
+  do script "$(printf '%s' "$_cmd" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+end tell
+OSA
+    _n=$((_n+1))
+    echo "✓ Opened a watcher window for '$_alias' (pid $_pid, port $_port)"
+    [ -n "$_tr" ] && echo "    transcript: $_tr" || echo "    transcript: not resolvable yet (engine health only)"
+  done <<EOF
+$(_launcher_sessions)
+EOF
+  if [ "$_n" -eq 0 ]; then
+    echo "No running local session found (nothing to open)."
+    echo "Start one with csl, then re-run: local-watch.sh --open"
+  fi
+  exit 0
+fi
+
 if [ "$MODE" = "list" ]; then
   echo "▶ Running local launcher sessions (launch-claude-agent.sh):"
-  pgrep -fl "launch-claude-agent.sh" 2>/dev/null | grep -v "pgrep\|local-watch" | sed 's/^/  /' || true
-  [ -z "$(pgrep -f launch-claude-agent.sh 2>/dev/null | grep -v $$)" ] && echo "  (none)"
+  _found=0
+  while IFS="$(printf '\t')" read -r _pid _alias; do
+    [ -n "${_pid:-}" ] || continue
+    _found=1
+    # The launcher exec's/holds `claude` as a child; that child owns the transcript file handle.
+    _cpid=$(pgrep -P "$_pid" 2>/dev/null | head -1)
+    _tr=""
+    [ -n "$_cpid" ] && _tr=$(_transcript_for_pid "$_cpid")
+    [ -z "$_tr" ] && _tr=$(_transcript_for_pid "$_pid")
+    echo "  • pid $_pid  alias=$_alias"
+    if [ -n "$_tr" ]; then
+      echo "      transcript (correlated, not guessed): $_tr"
+      echo "      $(_mut_cmd "$_tr")"
+    else
+      echo "      transcript: not resolvable yet (session still starting, or claude not yet writing)"
+    fi
+  done <<EOF
+$(_launcher_sessions)
+EOF
+  [ "$_found" -eq 0 ] && echo "  (none running — the sections below still work on past sessions)"
   echo
 fi
 
@@ -61,8 +133,8 @@ if [ "$MODE" = "list" ] || [ "$MODE" = "--health" ]; then
 fi
 
 if [ "$MODE" = "list" ] || [ "$MODE" = "--mutations" ]; then
-  echo "▶ MUTATIONS + THINKING — recent transcripts (pick the one for your session; newest first):"
-  echo "  (a local session's transcript is written to its cwd-slug dir; correlate by mtime/activity.)"
+  echo "▶ MUTATIONS + THINKING — recent transcripts (newest first; for a RUNNING session prefer the"
+  echo "  correlated path printed above, which is exact — these are for past or not-yet-started ones):"
   # shellcheck disable=SC2012
   ls -t "$PROJ"/*/*.jsonl 2>/dev/null | head -6 | while IFS= read -r t; do
     echo "  • $(basename "$t")   ($(date -r "$t" +%H:%M:%S 2>/dev/null))"

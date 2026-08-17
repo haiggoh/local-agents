@@ -98,7 +98,13 @@ la_load_config() {
   # Claude Code's API_TIMEOUT_MS defaults to 600000 (10 min) — too strict for a slow local model on a
   # heavy prompt (big prefill × many tools can exceed it, then retry-loop into a "Request timed out").
   # Give local sessions generous headroom. (Max is 2147483647; stay well under.)
-  : "${LA_API_TIMEOUT_MS:=1800000}"   # 30 min per request for local sessions
+  # Raised 30min -> 60min (2026-08-17). The old value predates knowing the real arithmetic: at the
+  # ~0.9 tok/s measured on this stack, LA_MAX_OUTPUT_TOKENS=8192 is ~2.5 HOURS of generation, so any
+  # cap short of that can still truncate a maximal turn. 60 min covers ~3,200 output tokens, which
+  # comfortably fits real turns while remaining a backstop against a genuinely stuck request. If you
+  # want a cap that can never truncate, set 10800000 (3h) — client-side disconnect detection, not this
+  # timeout, is what normally retires an abandoned request.
+  : "${LA_API_TIMEOUT_MS:=3600000}"   # 60 min per request for local sessions
   # Exclude configured MCP servers from local interactive sessions (--strict-mcp-config).
   # MCP tool DEFINITIONS are the single largest slice of a local session's prompt, and the local
   # model must prefill them. Measured on this stack (2026-08-17, `claude -p` payload intercepted):
@@ -111,6 +117,26 @@ la_load_config() {
   # available to local sessions at that prefill cost. The launcher always PRINTS which mode it used,
   # so a missing MCP tool is explainable rather than mysteriously absent.
   : "${LA_STRICT_MCP:=true}"
+  # Built-in tools withheld from local interactive sessions, via --disallowedTools. Unlike
+  # --allowedTools (which only filters what may RUN and leaves every definition in the prompt),
+  # --disallowedTools removes the definition from the payload — measured: 22 names dropped the
+  # request from 254,045 to 82,206 chars (~68.7k -> ~22.2k tok, -68%). Each name below is either
+  # unusable in a local session or contrary to how this stack works:
+  #   Workflow/Agent/SendMessage/ListAgents  multi-agent orchestration; local sub-agents go through
+  #                                          hotswap/curl, and the Agent picker rejects local models
+  #   DesignSync/Artifact                    claude.ai-account-coupled; a local session has no auth
+  #   Cron{Create,List,Delete}               session-only schedulers; durable scheduling is launchd
+  #   Enter/ExitWorktree                     isolation is driven by the supervising session, not from
+  #                                          inside the local one
+  #   Monitor/ScheduleWakeup                 watch/loop orchestration; heavy defs, Bash covers it
+  #   ReportFindings                         host-UI plumbing for cloud code review
+  # Workflow ALONE is 21,865 chars (~5.9k tok) — more than the entire system prompt. Set empty to
+  # withhold nothing. AskUserQuestion is deliberately NOT here: a local session must be able to ask.
+  : "${LA_DENY_TOOLS:=Workflow,DesignSync,Artifact,Agent,SendMessage,ListAgents,Monitor,ScheduleWakeup,CronCreate,CronList,CronDelete,EnterWorktree,ExitWorktree,ReportFindings}"
+  # Optional: path to a JSON file declaring the ONLY MCP servers a local session should load. Composes
+  # with LA_STRICT_MCP=true (which otherwise loads none), so you can keep one cheap server whose tools
+  # you actually want without paying for the whole configured set. Empty = load none.
+  : "${LA_MCP_CONFIG:=}"
   # Server-side per-request cap passed to `vllm-mlx serve --timeout` (seconds). Its default is 300,
   # which a local model at ~0.9 tok/s exceeds on ordinary turns — the server then kills the stream and
   # the client retries the whole turn, so 300s of work is discarded before the attempt that succeeds.

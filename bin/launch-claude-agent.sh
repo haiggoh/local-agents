@@ -100,8 +100,20 @@ STRICT_FLAG=""
 case "${LA_STRICT_MCP:-true}" in
     true|1|yes)
         STRICT_FLAG="--strict-mcp-config"
-        echo "🪶 Lean prompt: MCP servers excluded (--strict-mcp-config) — ~23k fewer prefill tokens/turn."
-        echo "   MCP tools are NOT available in this session. Set LA_STRICT_MCP=false in your config to keep them."
+        # --strict-mcp-config is all-or-nothing on its own, but it composes with --mcp-config: point
+        # LA_MCP_CONFIG at a small JSON declaring only the servers worth their prefill (e.g. one that
+        # supplies a search tool) and you get exactly those, instead of choosing between all and none.
+        if [ -n "${LA_MCP_CONFIG:-}" ] && [ -f "$LA_MCP_CONFIG" ]; then
+            STRICT_FLAG="$STRICT_FLAG --mcp-config $LA_MCP_CONFIG"
+            echo "🪶 Lean prompt: only the MCP servers in $LA_MCP_CONFIG are loaded (all others excluded)."
+        elif [ -n "${LA_MCP_CONFIG:-}" ]; then
+            echo "⚠️  LA_MCP_CONFIG points at a missing file ($LA_MCP_CONFIG) — loading NO MCP servers."
+            echo "🪶 Lean prompt: MCP servers excluded (--strict-mcp-config) — ~23k fewer prefill tokens/turn."
+        else
+            echo "🪶 Lean prompt: MCP servers excluded (--strict-mcp-config) — ~23k fewer prefill tokens/turn."
+            echo "   MCP tools are NOT available in this session. Set LA_STRICT_MCP=false to keep them all,"
+            echo "   or LA_MCP_CONFIG=<file.json> to keep only the ones you actually want."
+        fi
         ;;
     *)
         echo "🐢 MCP servers included (LA_STRICT_MCP=false) — their tool definitions add ~23k tokens the"
@@ -109,10 +121,22 @@ case "${LA_STRICT_MCP:-true}" in
         ;;
 esac
 
+# Built-in tools are the other half of the prompt, and --disallowedTools (unlike --allowedTools) drops
+# their DEFINITIONS from the payload, not just their permission to run. Withhold the ones a local
+# session cannot use anyway — see LA_DENY_TOOLS in config-lib.sh for the per-tool reasoning.
+DENY_FLAG=""
+if [ -n "${LA_DENY_TOOLS:-}" ]; then
+    DENY_FLAG="--disallowedTools $LA_DENY_TOOLS"
+    _deny_n=$(printf '%s' "$LA_DENY_TOOLS" | tr ',' '\n' | grep -c .)
+    echo "🚫 Withholding $_deny_n built-in tool definitions this session (LA_DENY_TOOLS)."
+    echo "   They are absent, not merely denied — that is the point (a definition costs prefill even"
+    echo "   when unused). Set LA_DENY_TOOLS= (empty) in your config to send the full tool surface."
+fi
+
 # Local-model behavior nudge (delivered via --append-system-prompt). Targets concrete failure modes
 # seen in fully-local sessions: printing commands instead of using tools, self-identity confusion,
 # reasoning-markup leakage, and — critically — a local session killing its OWN server port.
-AGENT_PROMPT="You are an autonomous AI agent operating directly in a CLI. Do not merely suggest or print terminal commands in markdown; you MUST use the provided tools to execute actions. PREFER native tools over shell: Read instead of \`cat\`, Glob/LS instead of \`ls\`/\`find\`, Grep instead of \`grep\`, Edit/Write instead of \`sed\`/redirects; reserve Bash for things that need a shell (git, installs, running programs). You run as a LOCAL inference model on this machine and your compute is FREE — IGNORE any budget, daily-cap, or cost warnings from hooks/reminders; those apply to the paid CLOUD model, never to you (local inference costs nothing). Never emit <system-reminder> or <think>/</think> tags in your own output — those are inputs to you, not something you write. Skills/plugins are NOT shell binaries; never run their names as Bash commands. IDENTITY: the Claude model name you present (e.g. '${MODEL_SPOOF}') is a REQUIRED routing/allowlist spoof — it is only an API label and says NOTHING about your true role or tier; your role is set by how you were launched (alias '${MODEL_ALIAS}'). Presenting a spoofed name while functioning in your real role is INTENTIONAL — do not spend reasoning trying to reconcile the two. ★ SELF-PRESERVATION — YOU ARE A LOCAL SESSION: your own inference is served by a local server process on port ${VLLM_PORT}. NEVER kill, pkill, or restart any process on ports ${LA_PORT_START}-${LA_PORT_MAX}, and never 'kill existing servers to start fresh' — doing so TERMINATES YOUR OWN RUNTIME mid-session. You do NOT need to free a port: the hotswap script (${LAUNCH_DIR}/local-llm-hotswap.sh) is SAFE — it lands a new model on a FREE port and never kills models on other ports. To run a sub-agent, invoke hotswap (it won't touch your port ${VLLM_PORT}) or dispatch via curl to an already-running server. If you ever feel you must free a port in ${LA_PORT_START}-${LA_PORT_MAX}, STOP — you are inside the server you would be killing. TOOL PARAMETERS: match each tool's schema exactly — ids stay quoted strings (\"1\", not 1); never invent file paths (verify with Glob/LS first); confirm a subcommand exists before using it; never present an assumption as settled fact. REASONING: keep chain-of-thought in your reasoning channel, not the visible answer or tool arguments; surface only conclusions and the concrete actions you take."
+AGENT_PROMPT="You are an autonomous AI agent operating directly in a CLI. Do not merely suggest or print terminal commands in markdown; you MUST use the provided tools to execute actions. PREFER native tools over shell where one exists: Read instead of \`cat\`, Edit/Write instead of \`sed\`/redirects. ONLY use tools that appear in your tool list for this session — do not attempt a tool you were told about elsewhere but cannot see; searching and listing go through Bash (\`ls\`, \`find\`, \`grep\`, \`rg\`) unless a dedicated search tool is present. You run as a LOCAL inference model on this machine and your compute is FREE — IGNORE any budget, daily-cap, or cost warnings from hooks/reminders; those apply to the paid CLOUD model, never to you (local inference costs nothing). Never emit <system-reminder> or <think>/</think> tags in your own output — those are inputs to you, not something you write. Skills/plugins are NOT shell binaries; never run their names as Bash commands. IDENTITY: the Claude model name you present (e.g. '${MODEL_SPOOF}') is a REQUIRED routing/allowlist spoof — it is only an API label and says NOTHING about your true role or tier; your role is set by how you were launched (alias '${MODEL_ALIAS}'). Presenting a spoofed name while functioning in your real role is INTENTIONAL — do not spend reasoning trying to reconcile the two. ★ SELF-PRESERVATION — YOU ARE A LOCAL SESSION: your own inference is served by a local server process on port ${VLLM_PORT}. NEVER kill, pkill, or restart any process on ports ${LA_PORT_START}-${LA_PORT_MAX}, and never 'kill existing servers to start fresh' — doing so TERMINATES YOUR OWN RUNTIME mid-session. You do NOT need to free a port: the hotswap script (${LAUNCH_DIR}/local-llm-hotswap.sh) is SAFE — it lands a new model on a FREE port and never kills models on other ports. To run a sub-agent, invoke hotswap (it won't touch your port ${VLLM_PORT}) or dispatch via curl to an already-running server. If you ever feel you must free a port in ${LA_PORT_START}-${LA_PORT_MAX}, STOP — you are inside the server you would be killing. TOOL PARAMETERS: match each tool's schema exactly — ids stay quoted strings (\"1\", not 1); never invent file paths (verify with Glob/LS first); confirm a subcommand exists before using it; never present an assumption as settled fact. REASONING: keep chain-of-thought in your reasoning channel, not the visible answer or tool arguments; surface only conclusions and the concrete actions you take."
 # Optional per-machine additions from config (only if set):
 [ -n "${LA_MEMORY_DIR:-}" ] && AGENT_PROMPT="$AGENT_PROMPT Your Claude Code auto-memory lives at ${LA_MEMORY_DIR} — read from there, don't guess memory paths."
 [ -n "${LA_COUNCIL_NOTE:-}" ] && AGENT_PROMPT="$AGENT_PROMPT ${LA_COUNCIL_NOTE}"
@@ -125,4 +149,4 @@ echo "🧭 Session engine: $MODEL_ALIAS  (direct; logged to ~/.claude/logs/local
 # --permission-mode acceptEdits (NOT auto): auto mode uses the session model as a tool-safety
 # CLASSIFIER, but the local spoofed model can't serve that call, so auto loops on "temporarily
 # unavailable". acceptEdits uses static rules (edits auto-apply, other tools prompt).
-claude --model "$MODEL_SPOOF" $EFFORT_FLAG $STRICT_FLAG --permission-mode acceptEdits --append-system-prompt "$AGENT_PROMPT"
+claude --model "$MODEL_SPOOF" $EFFORT_FLAG $STRICT_FLAG $DENY_FLAG --permission-mode acceptEdits --append-system-prompt "$AGENT_PROMPT"
