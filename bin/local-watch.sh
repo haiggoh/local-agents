@@ -46,12 +46,44 @@ _health_cmd() {  # $1=port
   # while 'N tokens in Ts (X tok/s)' is the only place the real generation rate appears.
   printf "tail -n0 -f %s/vllm_%s.log | grep --line-buffered -E '\\[REQUEST\\]|last user message preview|cache (HIT|MISS|SKIP)|prefilling|tokens in .*tok/s|CLEANUP done|TIMEOUT after|timed out|timeout|Error|Traceback|Killed|OOM|Exception|EngineBusy|CLIENT DISCONNECTED' | grep --line-buffered -vE 'disconnect_guard poll'\n" "$LOGDIR" "$1"
 }
-# Which transcript is a given local session actually writing? Correlate instead of guessing: the
-# launcher's `claude` child holds the .jsonl open, so lsof names it exactly. Beats sorting by mtime,
-# which picks whichever session wrote last — often the wrong one when two are running (and, from a
-# supervising cloud session, usually that session's own transcript).
-_transcript_for_pid() {  # $1 = pid of a claude process
-  lsof -p "$1" 2>/dev/null | grep -o "$PROJ/[^ ]*\.jsonl" | head -1
+# Which transcript is a given local session actually writing? READ it, do not infer it.
+#
+# CORRECTED 2026-08-18. The previous implementation asked lsof for the .jsonl handle held by the
+# launcher's `claude` child. That can never work: Claude Code appends to the transcript and CLOSES
+# it, so a live `claude` shows ZERO jsonl handles (measured across repeated samples on a running
+# session). The result was that every running session — the main use case — printed "not resolvable
+# yet", blaming startup timing for a design flaw.
+#
+# Two tempting replacements are also wrong, and both were tested:
+#   • newest-mtime: picks whichever session wrote last, which from a supervising cloud session is
+#     usually that session's OWN transcript.
+#   • content-matching the vllm log's user-message preview: watching a log copies the watched
+#     session's prompts INTO the watcher's transcript, so the watcher matches itself. Verified: the
+#     latest-preview probe returned the supervising session and missed the real one.
+# Claude Code also exposes no session id on the process and has no --session-id flag for a new
+# session, so there is nothing to read off the process either.
+#
+# So the launcher records it: launch-claude-agent.sh watches for the transcript appearing in its own
+# project dir after its own start (it is the one uncontaminated observer) and writes the path to a
+# sidecar keyed by its pid. This function just reads that.
+_transcript_for_launcher() {  # $1 = launcher pid
+  local sc="$LOGDIR/local-agents-session-$1.transcript" t
+  [ -s "$sc" ] || return 1
+  t=$(head -1 "$sc" 2>/dev/null)
+  [ -n "$t" ] && [ -f "$t" ] && printf '%s\n' "$t"
+}
+
+# Fallback only: plausible transcripts for a session whose sidecar is not there yet (a session
+# started before this version, or one that has not taken its first turn). Narrowed by the claude
+# process's real cwd, so at least the project dir is right. Reported as CANDIDATES, never as a fact.
+_transcript_candidates() {  # $1 = claude pid
+  local cwd proj
+  cwd=$(lsof -p "$1" 2>/dev/null | awk '$4=="cwd"{print $NF; exit}')
+  [ -n "$cwd" ] || return 1
+  proj="$PROJ/$(printf '%s' "$cwd" | sed 's/[^a-zA-Z0-9]/-/g')"
+  [ -d "$proj" ] || return 1
+  # shellcheck disable=SC2012
+  ls -t "$proj"/*.jsonl 2>/dev/null | head -3
 }
 _launcher_sessions() {   # -> "pid<TAB>alias" per running launcher
   # The alias is the argument AFTER the script path — NOT the last field. csl launches presets as
@@ -86,8 +118,7 @@ if [ "$MODE" = "--open" ]; then
   while IFS="$(printf '\t')" read -r _pid _alias; do
     [ -n "${_pid:-}" ] || continue
     _cpid=$(pgrep -P "$_pid" 2>/dev/null | head -1)
-    _tr=""; [ -n "$_cpid" ] && _tr=$(_transcript_for_pid "$_cpid")
-    [ -z "$_tr" ] && _tr=$(_transcript_for_pid "$_pid")
+    _tr=$(_transcript_for_launcher "$_pid" || true)
     # The port this session talks to is recorded by the launcher at startup; last line for this alias.
     _port=$(grep "alias=$_alias " "$HOME/.claude/logs/local-agents-sessions.log" 2>/dev/null \
             | tail -1 | grep -o "vllm_port=[0-9]*" | cut -d= -f2)
@@ -102,7 +133,12 @@ end tell
 OSA
     _n=$((_n+1))
     echo "✓ Opened a watcher window for '$_alias' (pid $_pid, port $_port)"
-    [ -n "$_tr" ] && echo "    transcript: $_tr" || echo "    transcript: not resolvable yet (engine health only)"
+    if [ -n "$_tr" ]; then
+      echo "    transcript: $_tr"
+    else
+      echo "    transcript: no sidecar yet — engine health only. The launcher writes"
+      echo "      $LOGDIR/local-agents-session-$_pid.transcript once this session takes its first turn."
+    fi
   done <<EOF
 $(_launcher_sessions)
 EOF
@@ -121,15 +157,21 @@ if [ "$MODE" = "list" ]; then
     _found=1
     # The launcher exec's/holds `claude` as a child; that child owns the transcript file handle.
     _cpid=$(pgrep -P "$_pid" 2>/dev/null | head -1)
-    _tr=""
-    [ -n "$_cpid" ] && _tr=$(_transcript_for_pid "$_cpid")
-    [ -z "$_tr" ] && _tr=$(_transcript_for_pid "$_pid")
+    _tr=$(_transcript_for_launcher "$_pid" || true)
     echo "  • pid $_pid  alias=$_alias"
     if [ -n "$_tr" ]; then
-      echo "      transcript (correlated, not guessed): $_tr"
+      echo "      transcript (recorded by the launcher, not guessed): $_tr"
       echo "      $(_mut_cmd "$_tr")"
     else
-      echo "      transcript: not resolvable yet (session still starting, or claude not yet writing)"
+      echo "      transcript: NOT RECORDED — no sidecar at"
+      echo "        $LOGDIR/local-agents-session-$_pid.transcript"
+      echo "      Either this session started before local-agents 0.9.0, or it has not taken its"
+      echo "      first turn yet (the .jsonl is created on turn 1, not at startup)."
+      _cands=$([ -n "$_cpid" ] && _transcript_candidates "$_cpid" || true)
+      if [ -n "$_cands" ]; then
+        echo "      CANDIDATES in this session's project dir (newest first) — unverified, pick by content:"
+        printf '%s\n' "$_cands" | while IFS= read -r _c; do echo "        $_c"; done
+      fi
     fi
   done <<EOF
 $(_launcher_sessions)

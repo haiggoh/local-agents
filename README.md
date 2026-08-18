@@ -170,9 +170,19 @@ Running it bare **starts the watchers** — one window per running session, so w
 no manual pairing of port to transcript. Watching a session is the reason you ran the script, so it does
 not require remembering a flag; with nothing running there is nothing to watch, and it falls back to the
 listing instead of doing nothing. `--list` forces print-only. Which transcript belongs to which
-session is **correlated, not guessed** — the launcher's `claude` child holds the `.jsonl` open, so
-`lsof` names it exactly. (Sorting transcripts by mtime picks whichever session wrote last, which from a
-supervising cloud session is usually that session's own transcript.)
+session is **recorded, not guessed** — since 0.9.0 the launcher itself writes the path to a sidecar
+(`~/.claude/logs/local-agents-session-<launcher-pid>.transcript`) as soon as the session takes its first
+turn, and the watcher just reads it.
+
+Three inference-based approaches were tried and all fail, which is why the launcher records it instead:
+`lsof` on the `claude` child finds nothing (Claude Code appends and CLOSES the `.jsonl`, so it holds no
+lasting handle); newest-mtime picks whichever session wrote last, which from a supervising cloud session
+is usually that session's *own* transcript; and matching the vllm log's user-message preview matches the
+*watcher*, because watching a log copies the watched prompts into the watcher's transcript. Claude Code
+exposes no session id on the process and has no `--session-id` flag for a new session. The launcher is
+the one uncontaminated observer: it knows its own start instant and cwd. When no sidecar exists yet the
+watcher says so plainly and lists unverified candidates rather than claiming a correlation it does not
+have.
 
 - **Health / turns / timeouts / stalls** → `~/.claude/logs/vllm_<PORT>.log` (one server = one log, so N
   concurrent servers are unambiguous). Filter to `[REQUEST]`/`CLEANUP done`/timeout/error/disconnect;

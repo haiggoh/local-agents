@@ -146,6 +146,37 @@ mkdir -p "$HOME/.claude/logs"
 echo "$(date '+%Y-%m-%d %H:%M:%S')  alias=$MODEL_ALIAS  spoof=$MODEL_SPOOF effort=$EFFORT  vllm_port=$VLLM_PORT  mode=direct" >> "$HOME/.claude/logs/local-agents-sessions.log"
 echo "🧭 Session engine: $MODEL_ALIAS  (direct; logged to ~/.claude/logs/local-agents-sessions.log)"
 
+# Record WHICH transcript this session writes, so watchers never have to guess it.
+# Why the launcher and not the watcher: Claude Code exposes no session id on the process, and it
+# does NOT hold a lasting file handle on its .jsonl (measured 2026-08-18: lsof on a live `claude`
+# shows ZERO jsonl handles across repeated samples), so the old lsof correlation in local-watch.sh
+# could never resolve a running session. Content-matching is worse than useless from a supervising
+# session, because watching a log copies the watched session's prompts into the WATCHER's own
+# transcript. The launcher is the one uncontaminated observer: it knows its own start instant and
+# cwd, so the first transcript appearing in this project dir afterwards is this session's.
+# Fully detached and best-effort — every failure is swallowed, so it can never affect the session.
+_LA_SIDECAR="$HOME/.claude/logs/local-agents-session-$$.transcript"
+(
+  _la_marker=$(mktemp -t la-launch) || exit 0
+  _la_proj="$HOME/.claude/projects/$(pwd | sed 's/[^a-zA-Z0-9]/-/g')"
+  # Poll for up to ~20 min: the .jsonl is created on the FIRST TURN, not at startup (measured gap
+  # of 8.5 min on a real session), so a short window would miss it on a slow local model.
+  _la_i=0
+  while [ "$_la_i" -lt 600 ]; do
+    _la_new=$(find "$_la_proj" -maxdepth 1 -name '*.jsonl' -newer "$_la_marker" 2>/dev/null | head -1)
+    if [ -n "$_la_new" ]; then printf '%s\n' "$_la_new" > "$_LA_SIDECAR"; break; fi
+    _la_i=$((_la_i+1)); sleep 2
+  done
+  rm -f "$_la_marker"
+) >/dev/null 2>&1 &
+# Drop sidecars whose launcher is gone, so the dir does not grow without bound.
+for _la_old in "$HOME"/.claude/logs/local-agents-session-*.transcript; do
+  [ -e "$_la_old" ] || continue
+  _la_pid=${_la_old##*-session-}; _la_pid=${_la_pid%.transcript}
+  case "$_la_pid" in ''|*[!0-9]*) continue;; esac
+  kill -0 "$_la_pid" 2>/dev/null || rm -f "$_la_old"
+done
+
 # --permission-mode acceptEdits (NOT auto): auto mode uses the session model as a tool-safety
 # CLASSIFIER, but the local spoofed model can't serve that call, so auto loops on "temporarily
 # unavailable". acceptEdits uses static rules (edits auto-apply, other tools prompt).
