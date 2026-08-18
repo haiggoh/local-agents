@@ -74,6 +74,15 @@ approach suppressed them).
 
 ## Install
 
+The plugin itself (skills, hooks, the offload nudge):
+
+```
+/plugin marketplace add haiggoh/get-haiggoh
+/plugin install local-agents@haiggoh
+```
+
+Then the local inference backend, which is what actually serves the models:
+
 ```bash
 git clone https://github.com/haiggoh/local-agents && cd local-agents
 ./install/install-backend.sh                       # venv + vllm-mlx + apply fork patches
