@@ -147,19 +147,62 @@ decide `local:`/`cloud:` per step → dispatch → **verify against ground truth
 output blind) → correct/re-dispatch. The `offload-to-local` skill documents this loop in full. (Landing
 the change afterwards is ordinary shipping discipline, so this plugin deliberately doesn't specify it.)
 
-**Way 2 — full local session** (niche; slower per turn):
+**Way 2 — full local session** (a local model as the session engine):
 ```bash
 ./bin/launch-claude-agent.sh my-operator                  # interactive local session
 ./bin/launch-claude-agent.sh deepseek-r1-architect max    # optional effort override
-./bin/csl                                                 # pick from a menu of presets
+./bin/csl                                                 # interactive picker (see below)
 ./bin/new-local-window.sh my-operator                     # open it in a NEW, independent Terminal window (macOS)
 ```
+
+### The picker: why a session is chosen differently from a dispatch
+
+`csl` gives you role-based **recommendations** and then lets you compose **any model with any effort
+level** (`low`, `medium`, `high`, `xhigh`, `max`). That is deliberate, because the two ways of using
+this plugin are different decisions:
+
+- **Dispatching local models as subagents** — the fixed roles and archetypes are the point. You route
+  a task to the model whose strengths suit it, and that matters most when several agents run at once.
+  Roles are what let you say "reasoner" without hardcoding a model name that changes as the roster does.
+- **Running a local model as the session engine** — there is exactly *one* engine, and the
+  model × effort pairing is your main lever over speed versus depth for everything you do in that
+  session. A fixed list of preset pairings hides that lever; free composition exposes it.
+
+So the roles stay, as a shortcut for the common case, and every combination is still reachable.
+
+The picker also offers to open a **watcher window** alongside the new session, on by default. A local
+turn takes long enough that "is it working or stuck?" becomes the question you ask most, and the
+engine log is the only place that answers it — so it should not require remembering a second command.
+Toggle it with `w` in the picker, or set `CSL_WATCH=0` to default it off.
+
+### What to expect from a local session
+
+Being able to run Claude Code on a local model at all is the win here, and it is a real one: your own
+hardware, no per-token cost, and work that keeps going when you are rate-limited, capped, or offline.
+It is worth being straight about what it is, though — this is not a drop-in replacement for the cloud
+models. It is a deliberate workaround that enables a mode of working Claude Code was not designed for,
+and the honest trade is that a locally-served model has less headroom than a frontier one and each
+turn spends real time re-reading a large prompt.
+
+Within those bounds it works better than you might expect, and noticeably better since the streaming
+timeout fix (long turns used to be killed mid-generation; see [The fork patches](#the-fork-patches-required-for-direct-routing)).
+Two practical notes: dispatch is the faster path when the work can be handed off as a self-contained
+task, and effort is the dial that decides how much of a turn goes into reasoning — which is why the
+picker puts it in your hands rather than fixing it per preset.
 
 **Convenience (optional):** `./install/setup-shortcuts.sh` puts `csl` on your PATH and adds
 `local-*` shell aliases (`local-operator`, `local-menu`, `local-window`, …). Idempotent; edits only
 a fenced block in your shell rc.
 
 ## Monitoring a running local session
+
+`csl` starts a watcher for you by default (above). To attach one by hand — including to a session that
+has only just started and has not taken its first turn yet:
+
+```bash
+./bin/local-watch.sh --attach <launcher-pid>   # follows one session: engine health now, mutations from turn 1
+```
+
 
 Local sessions run direct (no proxy), so there's **no reasoning tee** — you watch a running local
 session (or several) via two per-session sources. `bin/local-watch.sh` discovers what's running and

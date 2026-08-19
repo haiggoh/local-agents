@@ -155,6 +155,12 @@ echo "🧭 Session engine: $MODEL_ALIAS  (direct; logged to ~/.claude/logs/local
 # transcript. The launcher is the one uncontaminated observer: it knows its own start instant and
 # cwd, so the first transcript appearing in this project dir afterwards is this session's.
 # Fully detached and best-effort — every failure is swallowed, so it can never affect the session.
+# Publish the PORT immediately too (the transcript only appears on turn 1, but a watcher can start
+# tailing engine health right away). Keyed by the same pid, so `local-watch.sh --attach <pid>` can
+# find both halves of one session without guessing. NOTE this works because csl/`exec` REPLACES the
+# shell with the launcher, so $$ here is the very pid a watcher will see in pgrep.
+printf '%s\n' "$VLLM_PORT" > "$HOME/.claude/logs/local-agents-session-$$.port" 2>/dev/null || true
+
 _LA_SIDECAR="$HOME/.claude/logs/local-agents-session-$$.transcript"
 (
   _la_marker=$(mktemp -t la-launch) || exit 0
@@ -170,9 +176,9 @@ _LA_SIDECAR="$HOME/.claude/logs/local-agents-session-$$.transcript"
   rm -f "$_la_marker"
 ) >/dev/null 2>&1 &
 # Drop sidecars whose launcher is gone, so the dir does not grow without bound.
-for _la_old in "$HOME"/.claude/logs/local-agents-session-*.transcript; do
+for _la_old in "$HOME"/.claude/logs/local-agents-session-*.transcript "$HOME"/.claude/logs/local-agents-session-*.port; do
   [ -e "$_la_old" ] || continue
-  _la_pid=${_la_old##*-session-}; _la_pid=${_la_pid%.transcript}
+  _la_pid=${_la_old##*-session-}; _la_pid=${_la_pid%.transcript}; _la_pid=${_la_pid%.port}
   case "$_la_pid" in ''|*[!0-9]*) continue;; esac
   kill -0 "$_la_pid" 2>/dev/null || rm -f "$_la_old"
 done

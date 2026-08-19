@@ -25,6 +25,11 @@
 #   local-watch.sh --open       # force the open behaviour (explicit form of the default)
 #   local-watch.sh --health     # only the vllm-log health monitor command(s), one per active port
 #   local-watch.sh --mutations  # only the transcript mutation/thinking monitor command(s)
+#   local-watch.sh --attach <pid>
+#                               # FOLLOW one specific session, starting before it is ready. Used by
+#                               # csl's watcher toggle: it is spawned at launch time, waits for that
+#                               # session's port sidecar (immediate) and transcript sidecar (written
+#                               # on turn 1), then tails engine health + mutations for it alone.
 set -uo pipefail
 _s="${BASH_SOURCE[0]}"; while [ -h "$_s" ]; do _d="$(cd -P "$(dirname "$_s")" && pwd)"; _s="$(readlink "$_s")"; case "$_s" in /*) ;; *) _s="$_d/$_s";; esac; done
 BIN_DIR="$(cd -P "$(dirname "$_s")" && pwd)"
@@ -110,6 +115,55 @@ _model_on() {    # $1=port → the non-spoof model id served (best-effort)
   curl -s --max-time 2 "http://localhost:$1/v1/models" 2>/dev/null \
     | grep -o '"id":"[^"]*"' | cut -d'"' -f4 | grep -v '^claude-' | head -1
 }
+
+# --attach <pid>: follow ONE session, tolerating that it is not ready yet.
+# csl spawns this the moment it launches a session, so neither sidecar exists at first. The port
+# lands immediately; the transcript only exists once the session takes its first turn (which on a
+# local model can be minutes). So: start health as soon as the port is known, and fold in mutations
+# whenever the transcript shows up, instead of refusing to start.
+if [ "$MODE" = "--attach" ]; then
+  _apid="${2:-}"
+  case "$_apid" in ''|*[!0-9]*) echo "Usage: local-watch.sh --attach <launcher-pid>"; exit 1;; esac
+  _pfile="$LOGDIR/local-agents-session-$_apid.port"
+  _tfile="$LOGDIR/local-agents-session-$_apid.transcript"
+  printf '=== local-watch --attach: following session pid %s ===\n' "$_apid"
+  _port=""
+  for _i in $(seq 1 60); do
+    [ -s "$_pfile" ] && { _port=$(head -1 "$_pfile"); break; }
+    kill -0 "$_apid" 2>/dev/null || { echo "session pid $_apid exited before publishing a port."; exit 0; }
+    sleep 1
+  done
+  if [ -z "$_port" ]; then
+    echo "No port sidecar after 60s ($_pfile)."
+    echo "If this session was started by an older local-agents, relaunch it or use: local-watch.sh --list"
+    exit 1
+  fi
+  printf 'engine health: port %s\n' "$_port"
+  eval "$(_health_cmd "$_port")" &
+  _hpid=$!
+  # Fold in mutations when the transcript appears; keep health running either way.
+  (
+    for _j in $(seq 1 600); do
+      if [ -s "$_tfile" ]; then
+        _t=$(head -1 "$_tfile")
+        if [ -n "$_t" ] && [ -f "$_t" ]; then
+          printf '\n=== transcript now recorded: %s ===\n' "$_t"
+          eval "$(_mut_cmd "$_t")"
+          exit 0
+        fi
+      fi
+      kill -0 "$_apid" 2>/dev/null || exit 0
+      sleep 2
+    done
+  ) &
+  _mpid=$!
+  # Leave with the session: when the launcher exits, stop tailing.
+  ( while kill -0 "$_apid" 2>/dev/null; do sleep 5; done
+    printf '\n=== session pid %s exited — watcher stopping ===\n' "$_apid"
+    kill "$_hpid" "$_mpid" 2>/dev/null ) &
+  wait "$_hpid" 2>/dev/null
+  exit 0
+fi
 
 # --open: stop printing commands for the user to paste and just start the watchers. One Terminal
 # window per running session, so N concurrent sessions need no manual pairing of port to transcript.
