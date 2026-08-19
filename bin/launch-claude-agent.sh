@@ -88,6 +88,18 @@ export CLAUDE_CODE_MAX_OUTPUT_TOKENS="$LA_MAX_OUTPUT_TOKENS"   # bound worst-cas
 # token (long prefill) would otherwise trip before generation even starts.
 export API_TIMEOUT_MS="$LA_API_TIMEOUT_MS"
 export API_FORCE_IDLE_TIMEOUT=0
+# THIRD guard, and the one that actually bit (diagnosed 2026-08-19). CLI 2.1.196 turned on a separate
+# "streaming idle watchdog ... on by default for all providers — it aborts and retries when a response
+# stream produces no events for 5 minutes". API_FORCE_IDLE_TIMEOUT=0 does NOT cover it, so a local
+# session silently regained a ceiling: two 5-minute windows (abort + one retry) killed every turn at
+# almost exactly 600s having emitted just 2 chunks, because a big prefill emits NOTHING while it runs.
+# Observed on a real session: 8 turns dead at elapsed=600.0s / 2 chunks, while turns that got as far as
+# emitting tokens survived to 689s. Because each dead turn still grew the context, it could never
+# recover — a permanent retry loop, not slowness.
+# Turning the watchdog off is safe here rather than reckless: API_TIMEOUT_MS above still caps the
+# request, and vllm-mlx's own --timeout bounds it server-side, so a genuinely hung stream is still
+# bounded. On a local model a silent multi-minute prefill is normal, not a hang.
+export CLAUDE_ENABLE_STREAM_WATCHDOG=0
 
 echo "🔗 Direct local channel → $ANTHROPIC_BASE_URL  (model: ${MODEL_SPOOF}, effort: ${EFFORT})"
 

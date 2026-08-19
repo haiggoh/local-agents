@@ -194,6 +194,25 @@ picker puts it in your hands rather than fixing it per preset.
 `local-*` shell aliases (`local-operator`, `local-menu`, `local-window`, …). Idempotent; edits only
 a fenced block in your shell rc.
 
+### Timeouts (three guards, not two)
+
+A local model routinely takes minutes on a single turn, and emits **nothing at all** while it prefills
+a large prompt. Claude Code's defaults assume a fast cloud endpoint, so the launcher relaxes three
+separate limits — all three matter, and the third is the one that is easy to miss:
+
+| Variable | What it bounds |
+| --- | --- |
+| `API_TIMEOUT_MS` | overall per-request cap (default 600000 = 10 min) |
+| `API_FORCE_IDLE_TIMEOUT=0` | the "no bytes arrived yet" abort on a slow first token |
+| `CLAUDE_ENABLE_STREAM_WATCHDOG=0` | the streaming idle watchdog added in CLI **2.1.196**, on by default for all providers, which aborts **and retries** after 5 minutes without stream events |
+
+The third was diagnosed on 2026-08-19: with only the first two set, turns died at almost exactly
+**600s having emitted 2 chunks** (two 5-minute windows — one abort, one retry), while turns that got
+as far as emitting tokens survived past 689s. Because every killed turn still added to the context,
+the next prefill was longer, so a large-context session could never recover. Disabling the watchdog is
+bounded rather than reckless: `API_TIMEOUT_MS` still caps the request and vllm-mlx's own `--timeout`
+still caps it server-side.
+
 ## Monitoring a running local session
 
 `csl` starts a watcher for you by default (above). To attach one by hand — including to a session that
