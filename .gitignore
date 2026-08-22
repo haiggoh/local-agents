@@ -1,4 +1,7 @@
 # Your private overlay — NEVER published (this is the whole point of the overlay design).
+# Pattern, not a single name: any new *.local.* overlay (e.g. a private model catalog)
+# must be ignored the moment it is created, not the day someone remembers to list it.
+config/*.local.*
 config/config.local.sh
 
 # runtime / backups / caches

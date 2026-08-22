@@ -31,6 +31,16 @@ fi
 MODEL_DIR="$LA_CUR_DIR"; SPOOF_NAME="$LA_CUR_SPOOF"; SERVE="$LA_CUR_SERVE"
 TOOLP="$LA_CUR_TOOLP"; REASONP="$LA_CUR_REASONP"; THINK="$LA_CUR_THINK"
 if [ ! -d "$MODEL_DIR" ]; then echo "❌ model dir not found: $MODEL_DIR (check LA_MODELS_DIR / subdir in config)"; exit 1; fi
+# A directory is not a model. A metadata-only shell (configs + tokenizer, no weights) is left by an
+# aborted download; without this check the server starts and dies at load time with a far less
+# obvious error. Weights are always large, so "any file over 1MB" is format-agnostic. -L follows
+# symlinks so a legitimate asset-override symlink farm still counts as having its weights.
+if [ -z "$(find -L "$MODEL_DIR" -type f -size +1024k -print -quit 2>/dev/null)" ]; then
+    echo "❌ no weight files in $MODEL_DIR — the directory exists but holds no model (metadata-only shell)."
+    echo "   This is NOT the same as 'not downloaded': something is there, so a re-download may skip it."
+    echo "   Inspect with bin/la-disk-inventory.sh --empty, then re-fetch or repoint the alias."
+    exit 1
+fi
 
 # --- bounded readiness wait (dumps log tail + PID liveness on timeout; validates identity) ----
 wait_ready() {

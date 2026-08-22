@@ -214,14 +214,35 @@ la_lookup() {
   return 0
 }
 
-# la_on_disk <alias> -> 0 if the model's weights directory exists and is non-empty. This is what
+# la_on_disk <alias> -> 0 if the model's weights are actually present (a real weight file, not
+# just a non-empty directory). This is what
 # makes the roster "informed by what's actually available": a registered model isn't usable until
 # its files are present, so the resolver/installer check disk, not just registration.
 la_on_disk() {
   local sub="${LA_SUBDIR[$1]:-}" d
   [ -n "$sub" ] || return 1
   d="$LA_MODELS_DIR/$sub"
-  [ -d "$d" ] && [ -n "$(ls -A "$d" 2>/dev/null)" ]
+  [ -d "$d" ] || return 1
+  # Require an actual WEIGHT file, not merely a non-empty directory. A metadata-only shell (configs
+  # + tokenizer, no weights) is left behind by an aborted download; it looks installed and is not,
+  # and serving it fails at load time instead of here. Weights are always large, so "any file over
+  # 1MB" is a format-agnostic test that costs one find with -quit.
+  # -L is REQUIRED, not incidental: model-asset-override.sh builds legitimate models as SYMLINK
+  # FARMS pointing at a shared snapshot, and plain -type f does not match a symlink, so without -L
+  # a perfectly working override view is reported as having no weights. -L still rejects a farm
+  # whose targets are gone, which is the behaviour we want.
+  [ -n "$(find -L "$d" -type f -size +1024k -print -quit 2>/dev/null)" ]
+}
+
+# la_dir_present <alias> -> 0 if the model's directory exists at all, regardless of whether it holds
+# weights. The pair distinguishes three states a caller may want to report differently:
+#   la_dir_present && la_on_disk    usable now
+#   la_dir_present && ! la_on_disk  BROKEN: directory there, weights missing (re-fetch or unbind)
+#   ! la_dir_present                simply not downloaded
+la_dir_present() {
+  local sub="${LA_SUBDIR[$1]:-}"
+  [ -n "$sub" ] || return 1
+  [ -d "$LA_MODELS_DIR/$sub" ]
 }
 
 # la_models_for_role <role> -> prints, one per line, the aliases tagged with <role> (any position

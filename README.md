@@ -51,11 +51,16 @@ approach suppressed them).
   (or add them manually — see [Local Agent Dispatch](#local-agent-dispatch) below).
 - **`bin/csl`** — menu front-end built from your configured aliases.
 - **`config/`** — the overlay: `config.example.sh` (template) + your gitignored `config.local.sh`.
-- **`install/`** — `install-backend.sh` (venv + vllm-mlx + fork patches), `download-models.sh`,
+- **`install/`** — `install-backend.sh` (venv + vllm-mlx + fork patches), `download-models.sh`
+  (the downloader ENGINE: revisions, resume, dedupe, selective GGUF files, disk preflight),
   and `vllm-mlx-local-fork-patches.patch`.
 - **`bin/` diagnostics** — `tournament-dispatch.py`, `cancellation-matrix.py`,
   `check-tool-roundtrip.py`, `direct-route-acceptance.py`, `auto-mode-probe.sh`,
   `librarian-dispatch.py`, `thinking-log.py`, `git-local-review`.
+- **`bin/la-disk-inventory.sh`** — disk-first inventory: what's actually in your models dir, and
+  whether any catalog or the registry accounts for it (catches orphans and metadata-only shells).
+- **`config/model-catalog.psv`** — the default download list (data, not code); your private one goes
+  in `config/model-catalog.local.psv`.
 - **`bin/new-local-window.sh`** — open a full local session in a new, independent Terminal window (macOS).
 - **skills (7)** — two entry points plus five that each own one phase of a delegation:
   - `local-agents` — drive local sessions & dispatch.
@@ -94,6 +99,96 @@ $EDITOR config/config.local.sh                     # set model dir, ports, and y
 You choose which weights to fetch — large models aren't the right fit for every machine, and a
 **partial roster is fine**: whatever you download fills the roles it's tagged with; the rest of the
 work stays on the cloud model.
+
+## Downloading models
+
+Two artifacts, and only one of them is code:
+
+```text
+install/download-models.sh   the ENGINE    — never edit it to add a model
+config/model-catalog.psv     the CATALOG   — this is where models are listed
+```
+
+**Adding, removing, or retagging a model is a one-line edit to the catalog.** The engine already
+knows how to pin revisions, resume, deduplicate, select individual files out of a multi-quant GGUF
+repo, and tell four acquisition states apart. You get all of that by *not* touching it.
+
+A shipped `config/model-catalog.psv` gives you two proven models that cover every role between
+them — Qwen3.6 27B (operator, reasoner via thinking, utility, and the only one here that drives a
+**full local session**) and DeepSeek R1 Distill 32B (an independent validator; dispatch-only, as it
+does not emit structured tool calls). Roughly 45 GB for the pair.
+
+```bash
+install/download-models.sh --list                    # what's available, and its state on disk
+install/download-models.sh --select qwen36-27b-4bit   # fetch one thing
+install/download-models.sh --group default            # fetch a whole group
+install/download-models.sh --all --dry-run            # resolve everything, write nothing
+```
+
+Your own longer list belongs in `config/model-catalog.local.psv` — gitignored, and loaded *in
+addition* to the shipped defaults, so a private roster never has to fork the public one. Point at an
+arbitrary file with `--catalog FILE`, or several with `$LA_MODEL_CATALOG` (`:`-separated); either
+replaces the search entirely.
+
+Catalog format is ten `|`-separated fields; `--help` documents each one:
+
+```text
+alias|label|repo|revision|subdir|size_GB|group|status|include_patterns|runtime
+```
+
+Two fields earn their keep. `revision` takes a commit SHA — pin it whenever the artifact matters,
+because `main` moves. `include_patterns` takes `;`-separated globs, so one entry can take exactly
+`*UD-Q4_K_XL*.gguf` out of a repo holding a dozen quantizations instead of all of them.
+
+### It won't quietly fill your disk
+
+Before downloading, the queued selection is summed against free space on the target volume minus a
+reserve (100 GB by default, or `$LA_DISK_HEADROOM_GB`). If it won't fit you get the shortfall, a
+concrete `--select` subset that *does* fit, and any other mounted volume with room:
+
+```text
+  ⚠️  WILL NOT FIT — short by ~196.00 GB after reserving 100 GB.
+  Option A — a subset that DOES fit (1 of 3, ~114.00 GB):
+        --select glm-air-8
+```
+
+Non-interactive runs **refuse** rather than fill the disk; interactively you're offered the fitting
+subset. Escape hatches: `--target DIR` (another volume), `--headroom-gb N`, `--allow-tight`.
+Already-downloaded entries cost nothing and aren't counted. Catalog sizes are display estimates, so
+treat this as a guard rail, not an allocation guarantee. (It is unrelated to the runtime *memory*
+headroom a model needs to actually serve.)
+
+### Three states that are easy to confuse
+
+| | |
+|---|---|
+| **download list** | models that *could* be fetched — the catalog. Aspirational. |
+| **on disk** | weights that exist. What you can serve today. |
+| **registered** | an alias in `config.local.sh`, so a role or launcher can address it. |
+
+They drift apart, so two tools read them from opposite ends:
+
+```bash
+bin/la-roles.sh              # registry -> disk:  "which role can I fill right now?"
+bin/la-disk-inventory.sh     # disk -> registry:  "what's on my disk, and is it accounted for?"
+```
+
+`la-disk-inventory.sh` is what catches the cases nothing else will: an **ORPHAN** (weights on disk
+that no catalog and no registry mentions — usually a manual download, or a retired model whose entry
+was removed while its weights stayed), and a **NOPAYLOAD** directory (configs and tokenizer but no
+weight file — a metadata-only shell from an aborted fetch, which looks installed and isn't). Use
+`--orphans`, `--empty`, or `--du` to narrow it.
+
+A missing `.la-download-complete` marker is not corruption. It means this engine didn't fetch it, so
+completeness is simply unverified — expected for anything you downloaded by hand.
+
+### Bash 4+
+
+The downloader and the config library use associative arrays, so they need Bash 4 or newer. macOS
+ships Bash 3.2, so the script **relaunches itself** into `/opt/homebrew/bin/bash` or
+`/usr/local/bin/bash` automatically — you normally notice nothing. If neither exists it stops with a
+clear message rather than a confusing shell error; `brew install bash` resolves it. Run the script
+directly (it is executable and self-bootstrapping); do not `source` it into zsh.
 
 ## The overlay (public tooling, private config)
 

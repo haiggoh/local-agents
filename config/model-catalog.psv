@@ -1,0 +1,42 @@
+# model-catalog.psv — the DEFAULT download list shipped with local-agents.
+#
+# Deliberately SMALL. These are models proven to work on the reference stack, chosen so that
+# TWO downloads cover every archetypal role. Nothing here is aspirational: this is not the
+# tournament roster, it is a working starting point.
+#
+# This file is DATA. Adding a model is an edit HERE, never a change to the downloader script.
+# Your own longer/private list goes in config/model-catalog.local.psv (gitignored) — it is
+# loaded IN ADDITION to this file, so you keep these defaults and add your own on top.
+#
+# Format — one entry per line, ten '|'-separated fields:
+#   alias|label|repo|revision|subdir|size_GB|group|status|include_patterns|runtime
+# Full field docs: run `download-more-models.sh --help`.
+#
+# ---------------------------------------------------------------------------------------
+# Why two models cover four roles — the double-role assignment
+# ---------------------------------------------------------------------------------------
+#   Qwen3.6 27B    operator   the broad default for delegated work
+#                  reasoner   SAME WEIGHTS, thinking enabled — a second download is not needed
+#                  utility    same weights at low effort, and it is already multimodal
+#                  SESSION    the one model here that can drive a FULL local Claude Code
+#                             session (it emits structured tool_calls), not just dispatches
+#   DeepSeek R1    validator  an INDEPENDENT reasoner for review/critique. Different family
+#                  reasoner   on purpose: a second opinion from the same weights is not one.
+#
+#   ⚠️ DeepSeek R1 Distill does NOT emit structured tool_calls, so it is DISPATCH-ONLY —
+#      excellent for curl-dispatched reasoning and review, unusable as an interactive driver.
+#      That is exactly why the pair is Qwen (session-capable) + DeepSeek (validator).
+#
+# Sizes below are MEASURED download sizes (hf dry-run, 2026-08-21), not estimates.
+# Both together ≈ 45 GB. The downloader reserves 100 GB of free space by default; see
+# --headroom-gb and --target if that does not suit your disk.
+#
+# Optional additions once these two work — add them yourself rather than shipping them:
+#   mlx-community/Kimi-VL-A3B-Thinking-2506-6bit  ~13 GB  a dedicated vision model. Usually
+#       redundant: Qwen3.6 27B already handles images.
+#   mlx-community/Llama-4-Scout-17B-16E-Instruct-4bit  ~57 GB  cheap high-volume utility work,
+#       but served via mlx_lm.server and DISPATCH-ONLY.
+# ---------------------------------------------------------------------------------------
+
+qwen36-27b-4bit|Qwen3.6 27B UD-MLX 4-bit — operator + reasoner (thinking) + utility, and the one that runs full local SESSIONS|unsloth/Qwen3.6-27B-UD-MLX-4bit|main|Qwen3.6-27B-UD-MLX-4bit|26.2|default,session,operator|primary||vllm-mlx
+deepseek-r1-32b-4bit|DeepSeek R1 Distill Qwen 32B 4-bit — independent validator/reasoner (DISPATCH-ONLY: no structured tool_calls)|mlx-community/DeepSeek-R1-Distill-Qwen-32B-4bit|main|DeepSeek-R1-Distill-Qwen-32B-4bit|18.4|default,validator|primary||vllm-mlx
