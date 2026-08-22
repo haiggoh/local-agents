@@ -6,7 +6,9 @@
 # them for MULTIPLE concurrent local sessions at once:
 #   • HEALTH (turns / timeouts / stalls / disconnects)  → the per-PORT vllm request log
 #       ~/.claude/logs/vllm_<PORT>.log   (one server = one log → clean for N concurrent servers)
-#   • MUTATIONS + THINKING (per SESSION)                → the native transcript .jsonl
+#   • THINKING + ACTIONS (per SESSION)                  → the native transcript .jsonl,
+#       rendered for humans by bin/la-stream-render.py (thinking as clean paragraphs, one line
+#       per tool call). Add --diagnostic for the raw stream.
 #       tool_use (Bash/Edit/Write/git/waypoints…) and type:"thinking" blocks (post-turn, not live)
 # Post-hoc reasoning of any session:  bin/thinking-log.py --session <id> [--local-only]
 #
@@ -24,7 +26,8 @@
 #   local-watch.sh --list       # print-only: sessions, active ports, transcripts + monitor commands
 #   local-watch.sh --open       # force the open behaviour (explicit form of the default)
 #   local-watch.sh --health     # only the vllm-log health monitor command(s), one per active port
-#   local-watch.sh --mutations  # only the transcript mutation/thinking monitor command(s)
+#   local-watch.sh --mutations  # only the transcript thinking/action monitor command(s)
+#   local-watch.sh --diagnostic # raw stream instead of the readable renderer (combine with any mode)
 #   local-watch.sh --attach <pid>
 #                               # FOLLOW one specific session, starting before it is ready. Used by
 #                               # csl's watcher toggle: it is spawned at launch time, waits for that
@@ -36,6 +39,14 @@ BIN_DIR="$(cd -P "$(dirname "$_s")" && pwd)"
 # shellcheck source=/dev/null
 . "$BIN_DIR/../config/config-lib.sh"; la_load_config || exit 1
 LOGDIR="$HOME/.claude/logs"; PROJ="$HOME/.claude/projects"
+
+# --diagnostic: raw stream instead of the human renderer. Stripped from "$@" so it can appear
+# anywhere without disturbing positional parsing (e.g. `--attach 123 --diagnostic`).
+_la_args=()
+for _a in "$@"; do
+  if [ "$_a" = "--diagnostic" ]; then export LA_WATCH_DIAGNOSTIC=1; else _la_args+=("$_a"); fi
+done
+set -- ${_la_args[@]+"${_la_args[@]}"}
 MODE="${1:-}"
 # Bare invocation means "watch what's running". Resolve that to --open when there IS something to
 # watch, and to the listing when there isn't, so the useful thing happens without a remembered flag.
@@ -103,7 +114,16 @@ _launcher_sessions() {   # -> "pid<TAB>alias" per running launcher
       }'
 }
 _mut_cmd() {     # $1=transcript path
-  printf "tail -n0 -f %s | grep --line-buffered -E '\"type\":\"thinking\"|\"name\":\"(Bash|Edit|Write|NotebookEdit)\"|git (commit|push)|waypoints\\.py (done|edit|add)|installed_plugins|marketplace|rm -|mv '\n" "$1"
+  # DEFAULT: pipe the transcript through the renderer, which prints thinking as clean wrapped
+  # paragraphs and one concise line per tool call, dropping ~53% of records that are pure noise to a
+  # human (attachment / queue-operation / mode / permission-mode / ai-title / file-history).
+  # Previously this grepped raw .jsonl, so thinking was technically on screen but illegible.
+  # LA_WATCH_DIAGNOSTIC=1 (or --diagnostic) restores the raw grep for debugging the stream itself.
+  if [ "${LA_WATCH_DIAGNOSTIC:-0}" = "1" ]; then
+    printf "tail -n0 -f %s | grep --line-buffered -E '\"type\":\"thinking\"|\"name\":\"(Bash|Edit|Write|NotebookEdit)\"|git (commit|push)|waypoints\\.py (done|edit|add)|installed_plugins|marketplace|rm -|mv '\n" "$1"
+  else
+    printf "tail -n0 -f %s | %s/la-stream-render.py\n" "$1" "$BIN_DIR"
+  fi
 }
 _active_ports() {
   local p

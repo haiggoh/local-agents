@@ -44,6 +44,20 @@ MODEL_SPOOF="${LA_CUR_SPOOF%%,*}"
 EFFORT="${EFFORT_OVERRIDE:-$LA_CUR_EFFORT}"
 EFFORT_FLAG="--effort $EFFORT"
 
+# RAM PREFLIGHT — before any weights load. Booting a model while other servers hold RAM has
+# frozen this machine hard (Terminal AND the force-quit menu became unresponsive), and there is no
+# graceful recovery from that state, so the check must precede the load, not follow a failure.
+# It short-circuits: if the model already fits, it never even looks at the other ports.
+if [ -x "$LAUNCH_DIR/la-ram-preflight.sh" ]; then
+    if ! "$LAUNCH_DIR/la-ram-preflight.sh" "$MODEL_ALIAS"; then
+        echo
+        echo "🛑 Not launching $MODEL_ALIAS — see the RAM preflight above."
+        echo "   Override with LA_SKIP_RAM_PREFLIGHT=1 if you are certain the numbers are wrong."
+        [ "${LA_SKIP_RAM_PREFLIGHT:-0}" = "1" ] || exit 1
+        echo "   LA_SKIP_RAM_PREFLIGHT=1 set — continuing at your own risk."
+    fi
+fi
+
 echo "⏳ Initializing local engine for $MODEL_ALIAS..."
 LAUNCH_OUTPUT=$("$LAUNCH_DIR/local-llm-hotswap.sh" "$MODEL_ALIAS"); echo "$LAUNCH_OUTPUT"
 VLLM_PORT=$(echo "$LAUNCH_OUTPUT" | grep -o "SUCCESS_PORT=[0-9]*" | cut -d'=' -f2)
@@ -101,7 +115,23 @@ export API_FORCE_IDLE_TIMEOUT=0
 # bounded. On a local model a silent multi-minute prefill is normal, not a hang.
 export CLAUDE_ENABLE_STREAM_WATCHDOG=0
 
-echo "🔗 Direct local channel → $ANTHROPIC_BASE_URL  (model: ${MODEL_SPOOF}, effort: ${EFFORT})"
+# STARTUP BANNER — deliberately loud. A local session's identity used to be a couple of plain
+# lines that the long waypoints banner buried, leaving no way to tell at a glance which model is
+# actually driving the session. Box-drawing + emoji survive that noise.
+_think_label=$([ "${THINK:-false}" = "true" ] && echo "ON 🧠" || echo "off")
+cat <<BANNER
+
+╔══════════════════════════════════════════════════════════════════════════╗
+║  🖥️  LOCAL SESSION — inference runs on THIS MACHINE, \$0 per token         ║
+╚══════════════════════════════════════════════════════════════════════════╝
+   🤖 model    : ${MODEL_ALIAS}   (presenting as ${MODEL_SPOOF})
+   🎚️  effort   : ${EFFORT}
+   🧠 thinking : ${_think_label}
+   🔌 port     : ${VLLM_PORT}   →  ${ANTHROPIC_BASE_URL}
+   📊 watch it : ${LAUNCH_DIR}/local-watch.sh --attach <session-pid>
+   ⚠️  NOT the cloud model. Budget/cap warnings from hooks do not apply here.
+──────────────────────────────────────────────────────────────────────────────
+BANNER
 
 # --- prompt weight: keep the tool surface off the local model's prefill path -------------------
 # The dominant cost of a local interactive turn is PREFILL, and tool definitions dominate the
@@ -175,17 +205,23 @@ printf '%s\n' "$VLLM_PORT" > "$HOME/.claude/logs/local-agents-session-$$.port" 2
 
 _LA_SIDECAR="$HOME/.claude/logs/local-agents-session-$$.transcript"
 (
-  _la_marker=$(mktemp -t la-launch) || exit 0
   _la_proj="$HOME/.claude/projects/$(pwd | sed 's/[^a-zA-Z0-9]/-/g')"
+  # FIXED 2026-08-22: this used `find -newer <marker>`, which matches any transcript MODIFIED since
+  # launch — so with a second local session already live, that session's constantly-appended
+  # transcript won the race and this sidecar pointed a watcher at the WRONG session (observed:
+  # --attach on the deepseek launcher showed the qwen session). Track NEW FILES instead: snapshot
+  # the set that exists now, then accept only a path that was not in it.
+  _la_before=$(mktemp -t la-before) || exit 0
+  find "$_la_proj" -maxdepth 1 -name '*.jsonl' 2>/dev/null | sort > "$_la_before"
   # Poll for up to ~20 min: the .jsonl is created on the FIRST TURN, not at startup (measured gap
   # of 8.5 min on a real session), so a short window would miss it on a slow local model.
   _la_i=0
   while [ "$_la_i" -lt 600 ]; do
-    _la_new=$(find "$_la_proj" -maxdepth 1 -name '*.jsonl' -newer "$_la_marker" 2>/dev/null | head -1)
+    _la_new=$(find "$_la_proj" -maxdepth 1 -name '*.jsonl' 2>/dev/null | sort | comm -13 "$_la_before" - | head -1)
     if [ -n "$_la_new" ]; then printf '%s\n' "$_la_new" > "$_LA_SIDECAR"; break; fi
     _la_i=$((_la_i+1)); sleep 2
   done
-  rm -f "$_la_marker"
+  rm -f "$_la_before"
 ) >/dev/null 2>&1 &
 # Drop sidecars whose launcher is gone, so the dir does not grow without bound.
 for _la_old in "$HOME"/.claude/logs/local-agents-session-*.transcript "$HOME"/.claude/logs/local-agents-session-*.port; do

@@ -57,6 +57,11 @@ approach suppressed them).
 - **`bin/` diagnostics** — `tournament-dispatch.py`, `cancellation-matrix.py`,
   `check-tool-roundtrip.py`, `direct-route-acceptance.py`, `auto-mode-probe.sh`,
   `librarian-dispatch.py`, `thinking-log.py`, `git-local-review`.
+- **`bin/la-ram-preflight.sh`** — decides whether a model can load without stalling the machine,
+  before any weights are read. Asks three questions cheapest-first (does it fit / are other models
+  loaded / are they attached) and stops as soon as the answer is settled.
+- **`bin/la-stream-render.py`** — renders a session transcript for a human watcher: thinking as
+  clean paragraphs, one concise line per tool call. `local-watch.sh` uses it by default.
 - **`bin/la-disk-inventory.sh`** — disk-first inventory: what's actually in your models dir, and
   whether any catalog or the registry accounts for it (catches orphans and metadata-only shells).
 - **`config/model-catalog.psv`** — the default download list (data, not code); your private one goes
