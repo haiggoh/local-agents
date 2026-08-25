@@ -1,0 +1,9 @@
+# Qwen3.8 initial local-session qualification catalog
+#
+# Schema:
+# alias|label|repo|revision|subdir|size_GB|group|status|include_patterns|runtime
+#
+# This first acquisition intentionally contains only the ordinary 4-bit target.
+# MTP and alternate/mixed quantizations remain separate follow-up variables.
+
+qwen38-27b-4bit|Qwen3.8 27B MLX 4-bit — initial local-session successor candidate|mlx-community/Qwen3.8-27B-4bit|3e6447f082e89cc7f0bc6e5441afd38dfce760ff|Qwen3.8-27B-4bit|16.1|qwen38,session,operator|candidate||vllm-mlx

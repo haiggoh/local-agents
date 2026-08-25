@@ -37,7 +37,7 @@ WATCH="${CSL_WATCH:-1}"
 SESSION_ALIASES=()
 for a in "${LA_ALIASES[@]}"; do
   case "${LA_SERVE[$a]:-}" in
-    vllm|vllm-mlx|"") SESSION_ALIASES+=("$a") ;;
+    vllm|vllm-mlx|rapid|"") SESSION_ALIASES+=("$a") ;;
     *) ;;
   esac
 done

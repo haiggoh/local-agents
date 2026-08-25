@@ -1,0 +1,605 @@
+# Changelog
+
+All notable changes to `local-agents` are documented in this file.
+
+The project began using Git tags after development was already underway and did not tag every later release consistently. Historical entries through `0.12.0` were reconstructed from the complete public Git commit history, full commit messages, plugin-manifest version transitions, README history, and available tags.
+
+Where no Git tag exists, the release heading links directly to its release commit. Component versions—such as the terminal `local-agent-dispatch` version—remain independent unless explicitly identified as the plugin release version.
+
+## [Unreleased]
+
+## [0.13.0] — 2026-08-25
+
+### Added
+
+- Add Rapid-MLX as a first-class `local-agents` backend.
+- Make Rapid-MLX the preferred architecture for full local sessions.
+- Retain patched `vllm-mlx` for compatibility, controlled A/B comparisons, unsupported models, and rollback.
+- Add backend-aware server identity and safe reuse.
+- Add Rapid-aware RAM preflight and cache accounting.
+- Allow Rapid-backed aliases to launch through `csl`.
+- Correct backend and thinking-state display in local-session banners.
+- Add smoke tests for Rapid hotswap, reuse, and RAM preflight.
+- Reposition full local Claude Code sessions as a major supported workflow complementary to local dispatch from cloud sessions.
+- Add project-wide changelog and roadmap documentation.
+- Add `la-evict.sh`, an emergency, one-server-at-a-time memory-recovery fallback for when the machine is already out of RAM and the terminal is unresponsive. It is deliberately standalone (no `config-lib.sh`, no registry) so it keeps working while the stack is sick.
+
+### Validated experimentally
+
+The following behavior has been observed on an Apple M4 Max with 128 GB unified memory. Release verification completed 2026-08-25: 224 tests pass with none failing (47 dispatch, 45 dispatch-state, 70 savings-ledger, 27 Rapid backend, 35 eviction), `tests/lint.sh` is ShellCheck-clean, and no cross-catalog alias, destination, or artifact-identity conflicts remain.
+
+- Rapid-MLX `0.12.18` serving Qwen3.6 and Qwen3.8 through the existing Homebrew Claude Code client.
+- Anthropic Messages, structured tools, tool-result continuation, streaming, cancellation, orphan cleanup, and immediate request reuse.
+- Full Qwen3.8 local Claude Code sessions through `local-agents`.
+- Hybrid-prefix reuse of approximately 27K prompt tokens.
+- Warm follow-up turns completing in approximately 2–3 seconds with a measured 20 GB/eight-entry cache profile.
+- Qwen3.8 oQ6, Qwen3.8 8-bit, matching 4-bit and 8-bit MTP sidecars, Nemotron Nano 4/6/8-bit, and Granite H-Tiny 6-bit acquired for later qualification.
+
+### Known limitations
+
+- The Rapid proof establishes bounded Qwen3.6 and Qwen3.8 text paths, not compatibility with the complete model roster.
+- Rapid vision support requires a separately pinned and qualified environment.
+- Visible reasoning leakage observed with Qwen3.6 persists with Qwen3.8.
+- MTP sidecars are acquired but remain unqualified.
+- **Total Metal memory is not bounded by `--cache-memory-mb`.** That flag caps the reusable prefix cache only; the KV/working set scales with context length and is not governed by it.
+- **Long-context sessions can abort the server.** Measured on Qwen3.8 27B 4-bit at 128 GB: Metal high-water was 37.9 GB at 32,214 prompt tokens but 99.9 GB at 103,020, against a 103.9 GB allocation limit — roughly 0.6–0.8 GB of KV per 1,000 tokens. The practical wall is near 105K tokens and the safe operating ceiling near 80K; compact before then. Seven `SIGABRT` aborts were observed in about 22 hours of long-context use.
+- **The measured 20 GB/eight-entry cache profile is not a safe default** and is deliberately not shipped. It produced roughly 2–3 second warm turns at shorter contexts, then reached about 107.9 GB Metal during a long-context run and aborted. Shipped defaults are 2,048 MB with two entries; the aggressive profile belongs in a private overlay.
+- Reducing the cache does **not** move the wall: a two-entry/6 GB/fixed-256-step profile aborted identically at about 103K tokens with the cache empty.
+- `ps rss` is not authoritative for MLX memory — it understated a server by roughly sevenfold. Inspect wired, Metal, and swap instead.
+
+## [0.12.0] — 2026-08-22
+
+Release commit: [`13bf844`](https://github.com/haiggoh/local-agents/commit/13bf844b6e3ef32530ef49d7c78a94cd7cd37dba)
+
+### Added
+
+- RAM preflight before loading local-model weights.
+- A prominent local-session banner showing model, compatibility ID, effort, thinking state, port, and watcher command.
+- `la-stream-render.py` for readable watcher output.
+- Diagnostics that distinguish whether a model fits, which other servers are resident, and whether those servers are attached to live Claude Code sessions.
+
+### Changed
+
+- RAM checks stop as soon as the answer is known instead of inspecting every process unconditionally.
+- The preflight reports possible idle-server reclamation or smaller alternatives but never terminates anything automatically.
+- Watcher output renders reasoning as readable paragraphs and tool calls as concise lines; raw output remains available in diagnostic mode.
+
+### Fixed
+
+- Attachment detection now examines local Claude processes’ `ANTHROPIC_BASE_URL` instead of transient established TCP connections.
+- Transcript correlation now identifies newly created transcript files rather than any transcript modified after launcher startup.
+- Prevented a pre-existing active session from being selected as a newly launched session’s transcript.
+
+### Safety
+
+- Added `LA_SKIP_RAM_PREFLIGHT=1` as an explicit override.
+- Addressed a real machine-freeze incident caused by loading another model without sufficient unified-memory headroom.
+
+## [0.11.0] — 2026-08-22
+
+Release commit: [`55f9ef0`](https://github.com/haiggoh/local-agents/commit/55f9ef00532b2254d043378abc8593773042c9d9)
+
+### Added
+
+- Revision-pinned, resumable model-download engine.
+- Data-only public model catalog plus additive private catalogs.
+- Selective file acquisition through include patterns.
+- `.la-download-complete` markers.
+- Acquisition states: `COMPLETE`, `PRESENT`, `METADATA`, and `ABSENT`.
+- Disk preflight with configurable reserve and fitting-subset suggestions.
+- `la-disk-inventory.sh` with orphan and no-payload detection.
+
+### Changed
+
+- Separated model-list data from downloader implementation.
+- Deduplicated downloads by alias, destination, and exact artifact identity.
+- Deduplicated catalog files by real path.
+- Required a real weight payload for on-disk usability checks.
+- Followed valid model symlink farms when checking weights.
+
+### Safety
+
+- Non-interactive downloads refuse to exceed the configured disk reserve.
+- Metadata-only model directories are rejected before server startup.
+- Private overlays under `config/*.local.*` are ignored automatically.
+
+## [0.10.1] — 2026-08-19
+
+Release commit: [`584bd0b`](https://github.com/haiggoh/local-agents/commit/584bd0b2562236db7ba2537860478da948b326a1)
+
+### Fixed
+
+- Disabled Claude Code’s separate streaming-idle watchdog for local sessions through `CLAUDE_ENABLE_STREAM_WATCHDOG=0`.
+- Fixed local turns being aborted and retried after two silent five-minute prefill windows.
+- Prevented long-context sessions from entering a cycle where each failed retry enlarged the next prompt.
+
+### Safety
+
+- Retained overall client and server request limits while disabling a watchdog that incorrectly treated multi-minute local prefill as a stalled stream.
+
+## [0.10.0] — 2026-08-19
+
+Release commit: [`2fe748b`](https://github.com/haiggoh/local-agents/commit/2fe748b62371eceb07828c03d1948adb0b4737ed)
+
+### Added
+
+- Free composition of any session-capable model with Claude Code effort levels `low`, `medium`, `high`, `xhigh`, and `max`.
+- Role-based recommendations without restricting the complete model × effort space.
+- Watcher toggle in `csl`, enabled by default.
+- Immediate per-session port sidecars so monitoring can begin before the first transcript exists.
+
+### Changed
+
+- Deduplicated repeated model/effort role recommendations.
+- Clarified role-based dispatch versus free-composition session selection.
+
+### Fixed
+
+- Corrected picker output captured inside command substitution instead of being shown.
+- Verified compose, toggle, invalid-input, passthrough, role, and watcher paths.
+
+## [0.9.1] — 2026-08-18
+
+Release commit: [`c72cfb5`](https://github.com/haiggoh/local-agents/commit/c72cfb595e93ced4078f66ef1fd4abc75f317e7a)
+
+### Documentation
+
+- Added plugin marketplace installation commands to the README.
+- Made installation discoverable directly from the repository.
+
+## [0.9.0] — 2026-08-18
+
+Release commit: [`0c3d0ad`](https://github.com/haiggoh/local-agents/commit/0c3d0adf46184573a31a4224aae5ab8604d04a77)
+
+### Fixed
+
+- Replaced impossible `lsof`-based transcript inference with launcher-recorded transcript association.
+- Added per-launch transcript sidecars.
+- Rejected sidecars pointing at missing transcript files.
+- Added an honest unverified-candidate fallback when no association exists.
+- Prevented newest-mtime and content-matching approaches from attaching the watcher to the wrong session.
+
+### Changed
+
+- Allowed a long polling window for slow first turns before transcript creation.
+- Pruned stale sidecars after their launcher exits.
+
+## [0.8.1] — 2026-08-17
+
+Tag: [`v0.8.1`](https://github.com/haiggoh/local-agents/tree/v0.8.1)  
+Release commit: [`06de907`](https://github.com/haiggoh/local-agents/commit/06de907ee2da66e5be42b8524a8a227779cc5c62)
+
+### Changed
+
+- Running `local-watch.sh` bare now opens watcher windows.
+- `--list` explicitly requests print-only behavior.
+- With no running sessions, the watcher falls back to listing.
+
+### Fixed
+
+- Corrected alias extraction when an effort argument follows the model alias.
+- Prevented menu-launched sessions from being misidentified by their effort argument.
+
+## [0.8.0] — 2026-08-17
+
+Tag: [`v0.8.0`](https://github.com/haiggoh/local-agents/tree/v0.8.0)  
+Release commit: [`1a1bc10`](https://github.com/haiggoh/local-agents/commit/1a1bc10d165ce1e40005af764d9530c4c014b387)
+
+### Added
+
+- `LA_DENY_TOOLS` to remove unusable built-in tool definitions from local requests.
+- `LA_MCP_CONFIG` for retaining only selected MCP servers.
+- Watcher-window startup support.
+- Cache, prefill, and token-rate information in watcher health output.
+
+### Performance
+
+- Reduced a measured local Claude Code request from approximately 68.7K to 22.7K tokens.
+- Reduced request size by approximately 67% and measured tool-definition weight by approximately 86%.
+- Confirmed that `--disallowedTools` removes definitions, whereas `--allowedTools` does not reduce prompt size.
+
+### Fixed
+
+- Removed instructions to use nonexistent Claude Code tools.
+- Updated local-agent guidance to use only exposed tools.
+
+### Changed
+
+- Raised default local request timeout from 30 to 60 minutes.
+- Kept `AskUserQuestion` available.
+
+## [0.7.0] — 2026-08-17
+
+Tag: [`v0.7.0`](https://github.com/haiggoh/local-agents/tree/v0.7.0)  
+Release commit: [`e4406e9`](https://github.com/haiggoh/local-agents/commit/e4406e92cad6b24408b9872d14f93234178f68dd)
+
+### Fixed
+
+- Prevented `vllm-mlx` from terminating streaming turns at its 300-second server default.
+- Added `LA_SERVER_TIMEOUT_S`, derived from the local client timeout by default.
+- Added warnings for reused servers with missing or stale timeout settings.
+- Prevented long turns from wasting five minutes before a complete retry.
+
+### Changed
+
+- Running the launcher without an alias now opens `csl`.
+- Invalid aliases still show usage and valid choices.
+
+## [0.6.0] — 2026-08-17
+
+Tag: [`v0.6.0`](https://github.com/haiggoh/local-agents/tree/v0.6.0)  
+Release commit: [`9bab151`](https://github.com/haiggoh/local-agents/commit/9bab1515c43cbe8849c24abedebe518c823ec6ba)
+
+### Added
+
+- `LA_STRICT_MCP` configuration.
+- Startup output explaining whether MCP tools are included.
+
+### Performance
+
+- Made `--strict-mcp-config` the default for local sessions.
+- Removed 71 configured MCP tool definitions from measured prompts.
+- Reduced measured tool weight from approximately 46.9K to 23.9K tokens.
+
+### Documentation
+
+- Documented that tool definitions can dominate local prefill.
+- Recorded that `--allowedTools` does not shrink request payloads.
+
+## [0.5.1] — 2026-08-16
+
+Tag: [`v0.5.1`](https://github.com/haiggoh/local-agents/tree/v0.5.1)  
+Release commits: [`3628ee4`](https://github.com/haiggoh/local-agents/commit/3628ee41ebb65f7889d48b67afce6543858b3317), [`7561f5d`](https://github.com/haiggoh/local-agents/commit/7561f5d9d73b867ddaacdd6d8418c9e784f66ff8)
+
+### Fixed
+
+- Removed the Copilot launcher’s unused effort argument.
+- Warned on unexpected extra Copilot launcher arguments.
+- Restored a clean ShellCheck gate instead of suppressing a valid warning.
+
+### Documentation
+
+- Recorded future Copilot effort selection as deferred work.
+- Corrected stale pending entries for Copilot SSE and integration testing.
+
+## [0.5.0] — 2026-08-16
+
+Tag: [`v0.5.0`](https://github.com/haiggoh/local-agents/tree/v0.5.0)  
+Release commit: [`cf1266f`](https://github.com/haiggoh/local-agents/commit/cf1266fff422c07e1a915d794415a874550b4f56)
+
+### Added
+
+- Conversation-capable terminal `local-agent-dispatch` interface.
+- Structured history; compact, verbose, and quiet progress; multiline paste; file attachments; rolling summaries; and resumable named sessions.
+- Pure-helper tests for input normalization, session names, and model labels.
+- Public dispatcher documentation and component release metadata.
+- Experimental Copilot BYOK transport proof and integration harness.
+
+### Changed
+
+- Prepared the repository for public distribution.
+- Removed internal planning artifacts, private path references, and unexplained branding.
+- Moved Copilot material into a clearly experimental documentation area.
+- Removed the dispatcher’s development suffix for its first public release.
+
+### Fixed
+
+- Added a launcher hint directing no-argument users to `csl`.
+- Corrected misleading claims that Copilot BYOK was fully functional.
+- Documented dependence on unstable Copilot provider environment variables.
+
+### Known limitations
+
+- Copilot BYOK proved transport-level SSE compatibility, not reliable local-engine operation.
+- Dispatcher paste presentation and test coverage remained incomplete.
+
+## [0.4.0] — 2026-08-14
+
+Release commit: [`773b74d`](https://github.com/haiggoh/local-agents/commit/773b74d7749e72b413e3b5a59481bbfaf1632994)
+
+### Added
+
+- Local-offload savings ledger.
+- Append-only JSONL dispatch events and derived per-session/per-day rollups.
+- Reports for today, week, month, and arbitrary start dates.
+- Automatic best-effort ledger recording for successful dispatches.
+- Dated cloud-pricing table and custom rates-file support.
+- Initial terminal dispatcher files and documentation from preparatory commits included before this release boundary.
+
+### Safety
+
+- Unknown cloud models remain unpriced instead of producing a false zero.
+- Missing input-token counts remain explicitly unavailable rather than being interpreted as zero.
+- Raw prompt character counts are retained when tokens cannot be measured.
+- Ledger recording cannot fail a successful dispatch.
+
+### Testing
+
+- Added 70 ledger tests.
+- Mutation-tested model normalization, unknown pricing, and separate accounting of unpriced events.
+- Verified a live end-to-end dispatch.
+
+## [0.3.0] — 2026-08-11
+
+Release commit: [`188e835`](https://github.com/haiggoh/local-agents/commit/188e83564cb0bb6572972eb2df73364d6fff27c9)
+
+### Added
+
+- Delegation-phase skills:
+  - `compose-the-payload`;
+  - `brief-the-delegate`;
+  - `isolate-parallel-work`;
+  - `guard-shared-runtime`;
+  - `verify-delegated-work`.
+
+### Changed
+
+- Split delegation into narrowly triggered phases.
+- Moved generic shipping discipline out of local-model workflows.
+- Kept runtime-specific verification in `guard-shared-runtime`.
+- Removed unnecessary foreign-plugin references.
+
+### Fixed
+
+- Replaced nonexistent role-resolution commands.
+- Replaced GNU-only checksum examples with macOS-compatible SHA-256 commands.
+- Documented minimum `pip` support for dry-run dependency resolution.
+- Removed undefined variables and unverified port assumptions.
+- Defined delegate prompt placeholders explicitly.
+
+### Validation
+
+- Verified skill frontmatter, path safety, independence, and ShellCheck.
+
+## [0.2.15] — 2026-08-05
+
+Release commit: [`63eeac3`](https://github.com/haiggoh/local-agents/commit/63eeac37df79465a5ae95ea0aef011ee26073efc)
+
+### Fixed
+
+- The launcher selects the newest configured compatibility ID actually advertised by a reused server.
+- Prevented pre-change servers from causing immediate model-not-found errors.
+- Warned when none of the configured IDs are advertised.
+
+## [0.2.14] — 2026-08-05
+
+Release commit: [`2aa2b4b`](https://github.com/haiggoh/local-agents/commit/2aa2b4b2574594d84c4e8367b0ba372effec0995)
+
+### Added
+
+- Comma-separated compatibility-ID preference lists.
+- One server can advertise the same local weights under multiple Claude IDs.
+- Backward compatibility with single-value IDs.
+
+### Known limitations
+
+- Loaded models are keyed by served name, so deliberately requesting multiple IDs may load the same weights more than once before idle eviction.
+
+## [0.2.13] — 2026-08-05
+
+Release commit: [`3fe94d0`](https://github.com/haiggoh/local-agents/commit/3fe94d0891d0ce0a74346e0355acd1fcab07934e)
+
+### Fixed
+
+- Quoted skill-description frontmatter for strict YAML parsers.
+- Restored skill visibility outside tolerant Claude Code parsing.
+- Verified description values round-trip unchanged.
+
+## [0.2.12] — 2026-08-04
+
+Release commit: [`115a8a3`](https://github.com/haiggoh/local-agents/commit/115a8a3dc249810191b11cb797ede4f793f5362e)
+
+### Added
+
+- `--prompt`, `--model`, and `--max-tokens` convenience options for `librarian-dispatch.py`.
+- Automatic temporary output directory when `--outdir` is omitted.
+
+### Changed
+
+- Preserved the JSON-payload interface as the primary low-level route.
+
+### Testing
+
+- Verified convenience, payload-regression, and missing-input error paths.
+
+## [0.2.11] — 2026-08-04
+
+Release commit: [`b08eee4`](https://github.com/haiggoh/local-agents/commit/b08eee46f0a866b4d21b8814ad7ea61c756af801)
+
+### Added
+
+- Live streaming of `reasoning_content`.
+- `reasoning.txt` output.
+- Reasoning counts in completion metadata and heartbeat output.
+
+### Fixed
+
+- Reasoning-only responses no longer produce false `NO DATA` failures.
+
+## [0.2.10] — 2026-08-04
+
+Release commit: [`dc0b571`](https://github.com/haiggoh/local-agents/commit/dc0b571115ac8ee27ac2c7035a53b375232c16d0)
+
+### Added
+
+- Documented supervised offload loop: warm, route, decide, dispatch, verify, correct, and ship.
+- ShellCheck lint gate.
+
+### Fixed
+
+- Corrected dispatch documentation to use the actual payload-file interface.
+- Documented that standard macOS lacks GNU `timeout` and that the dispatcher provides its own watchdog.
+
+## [0.2.9] — 2026-08-04
+
+Release commit: [`e9e1a19`](https://github.com/haiggoh/local-agents/commit/e9e1a193067500ad1cc21504f08d2598e32da2fd)
+
+### Fixed
+
+- Fixed `wait_ready` aborting under `set -u` because arithmetic referenced a not-yet-bound same-line local variable.
+- Restored `SUCCESS_PORT` on fresh launches.
+
+## [0.2.8] — 2026-08-03
+
+Release commit: [`fdd9fab`](https://github.com/haiggoh/local-agents/commit/fdd9faba1d9de4b40458faf081e6e5fe0bec5e6c)
+
+### Added
+
+- Documented multi-session monitoring.
+- Per-port inference-health monitoring.
+- Transcript mutation and thinking monitoring.
+- Health-only and mutations-only watcher modes.
+- Repeatable transcript flush-lag measurement.
+
+### Findings
+
+- Measured reasoning-carrying transcript records appearing approximately 0.2–2.6 seconds after turn completion in the tested Claude Code version.
+
+## [0.2.7] — 2026-08-03
+
+Release commit: [`b0001d2`](https://github.com/haiggoh/local-agents/commit/b0001d2a88034cdbd92514ed73f1ea45308e72ad)
+
+### Added
+
+- `LA_API_TIMEOUT_MS`.
+
+### Fixed
+
+- Increased local request timeout beyond Claude Code’s cloud-tuned default.
+- Disabled the five-minute no-bytes idle abort for slow local prefill.
+
+## [0.2.6] — 2026-08-02
+
+Release commit: [`08cf812`](https://github.com/haiggoh/local-agents/commit/08cf812afb92afb0fcc23f8fa4ce246e8b871779)
+
+### Changed
+
+- Corrected the recommendation that all tool-driving work should default to a local session.
+- Documented parallel local sessions as a bounded pattern for substantial, isolated, verifiable work.
+- Added worktree/branch isolation and diff-review guidance.
+- Clarified that supervision and review remain real orchestration costs.
+
+## [0.2.5] — 2026-08-02
+
+Release commit: [`320126f`](https://github.com/haiggoh/local-agents/commit/320126fc0b3b90fb02774d37ce99081838b66bd2)
+
+### Changed
+
+- Added guidance to use streaming dispatch for long or open-ended generations.
+- Clarified that local Claude Code sessions can drive tools.
+- Clarified that stateless dispatch cannot run a tool loop.
+- Retained cloud routing where offload overhead exceeds the saving.
+
+## [0.2.4] — 2026-08-01
+
+Release commit: [`a432c1d`](https://github.com/haiggoh/local-agents/commit/a432c1dc8278b96bc649eaeb726f08c4a344e8b9)
+
+### Added
+
+- SessionStart offload nudge.
+- `la_role` as shared role-binding source.
+- Explicit `cloud:not worth offloading` escape valve.
+
+### Changed
+
+- Unified role resolution and `csl` around the same bindings.
+- Kept legacy presets and role tags backward compatible.
+
+## [0.2.3] — 2026-08-01
+
+Release commit: [`e16e512`](https://github.com/haiggoh/local-agents/commit/e16e51240448715d4894d2863d415f974c7ad922)
+
+### Changed
+
+- Made `operator` the broad default local role.
+- Defined `reasoner`, `validator`, and `utility` as depth/specialization escalations.
+- Required per-step `local:` or `cloud:` routing decisions for bulk multi-step work.
+- Defined roles as model × effort/thinking combinations.
+- Made the role vocabulary extensible.
+
+## [0.2.2] — 2026-08-01
+
+Release commit: [`cd62743`](https://github.com/haiggoh/local-agents/commit/cd627437bef35d76fc1dbdec7abe580d40712145)
+
+### Added
+
+- Optional registry fields for roles, Hugging Face repository, and approximate size.
+- Disk-aware role resolution and `la-roles.sh`.
+- Interactive model installation from the registry.
+- Partial-roster and multiple-model-per-role support.
+
+### Changed
+
+- Made the registry the roster’s single source of truth.
+- Replaced hardcoded model names in routing guidance with role names.
+- Kept older eight-field registry entries compatible.
+
+## [0.2.1] — 2026-08-01
+
+Release commit: [`e9c12cf`](https://github.com/haiggoh/local-agents/commit/e9c12cf823f544a9ef452aff8e2dae4e6fb792bd)
+
+### Changed
+
+- Moved offload decisions to task decomposition.
+- Added role-based routing for operator, reasoner, validator, and utility work.
+- Required self-contained instructions for stateless delegates.
+- Expanded triggers beyond explicit cost-saving requests.
+
+## [0.2.0] — 2026-07-31
+
+Release commit: [`3e8a51b`](https://github.com/haiggoh/local-agents/commit/3e8a51b94e2c61a84f57e163f2a337f7a8f724b8)
+
+### Added
+
+- `offload-to-local` skill.
+- Guidance for dispatching searches, summaries, boilerplate, transforms, and first-pass reviews to local models.
+- Guidance to retain frontier reasoning, security-sensitive work, and final review on capable cloud models by default.
+
+## [0.1.0] — 2026-07-30
+
+Release commit: [`f722c55`](https://github.com/haiggoh/local-agents/commit/f722c5585284b4934a987f7fbc15829f3790d877)
+
+### Added
+
+- Initial local MLX inference overlay for Claude Code on Apple Silicon.
+- Direct Anthropic-compatible local routing with native transcripts and history.
+- Gitignored machine-specific configuration.
+- Config-driven model registry.
+- Local launcher, hotswap helper, and `csl` picker.
+- Self-preservation and tool-use guidance for local sessions.
+- Backend installation and model-download helpers.
+- Patch bundle for the local `vllm-mlx` fork.
+- Tournament, cancellation, tool-roundtrip, direct-routing, and Auto-mode diagnostics.
+
+[Unreleased]: https://github.com/haiggoh/local-agents/compare/13bf844b6e3ef32530ef49d7c78a94cd7cd37dba...HEAD
+[0.12.0]: https://github.com/haiggoh/local-agents/commit/13bf844b6e3ef32530ef49d7c78a94cd7cd37dba
+[0.11.0]: https://github.com/haiggoh/local-agents/commit/55f9ef00532b2254d043378abc8593773042c9d9
+[0.10.1]: https://github.com/haiggoh/local-agents/commit/584bd0b2562236db7ba2537860478da948b326a1
+[0.10.0]: https://github.com/haiggoh/local-agents/commit/2fe748b62371eceb07828c03d1948adb0b4737ed
+[0.9.1]: https://github.com/haiggoh/local-agents/commit/c72cfb595e93ced4078f66ef1fd4abc75f317e7a
+[0.9.0]: https://github.com/haiggoh/local-agents/commit/0c3d0adf46184573a31a4224aae5ab8604d04a77
+[0.8.1]: https://github.com/haiggoh/local-agents/tree/v0.8.1
+[0.8.0]: https://github.com/haiggoh/local-agents/tree/v0.8.0
+[0.7.0]: https://github.com/haiggoh/local-agents/tree/v0.7.0
+[0.6.0]: https://github.com/haiggoh/local-agents/tree/v0.6.0
+[0.5.1]: https://github.com/haiggoh/local-agents/tree/v0.5.1
+[0.5.0]: https://github.com/haiggoh/local-agents/tree/v0.5.0
+[0.4.0]: https://github.com/haiggoh/local-agents/commit/773b74d7749e72b413e3b5a59481bbfaf1632994
+[0.3.0]: https://github.com/haiggoh/local-agents/commit/188e83564cb0bb6572972eb2df73364d6fff27c9
+[0.2.15]: https://github.com/haiggoh/local-agents/commit/63eeac37df79465a5ae95ea0aef011ee26073efc
+[0.2.14]: https://github.com/haiggoh/local-agents/commit/2aa2b4b2574594d84c4e8367b0ba372effec0995
+[0.2.13]: https://github.com/haiggoh/local-agents/commit/3fe94d0891d0ce0a74346e0355acd1fcab07934e
+[0.2.12]: https://github.com/haiggoh/local-agents/commit/115a8a3dc249810191b11cb797ede4f793f5362e
+[0.2.11]: https://github.com/haiggoh/local-agents/commit/b08eee46f0a866b4d21b8814ad7ea61c756af801
+[0.2.10]: https://github.com/haiggoh/local-agents/commit/dc0b571115ac8ee27ac2c7035a53b375232c16d0
+[0.2.9]: https://github.com/haiggoh/local-agents/commit/e9e1a193067500ad1cc21504f08d2598e32da2fd
+[0.2.8]: https://github.com/haiggoh/local-agents/commit/fdd9faba1d9de4b40458faf081e6e5fe0bec5e6c
+[0.2.7]: https://github.com/haiggoh/local-agents/commit/b0001d2a88034cdbd92514ed73f1ea45308e72ad
+[0.2.6]: https://github.com/haiggoh/local-agents/commit/08cf812afb92afb0fcc23f8fa4ce246e8b871779
+[0.2.5]: https://github.com/haiggoh/local-agents/commit/320126fc0b3b90fb02774d37ce99081838b66bd2
+[0.2.4]: https://github.com/haiggoh/local-agents/commit/a432c1dc8278b96bc649eaeb726f08c4a344e8b9
+[0.2.3]: https://github.com/haiggoh/local-agents/commit/e16e51240448715d4894d2863d415f974c7ad922
+[0.2.2]: https://github.com/haiggoh/local-agents/commit/cd627437bef35d76fc1dbdec7abe580d40712145
+[0.2.1]: https://github.com/haiggoh/local-agents/commit/e9c12cf823f544a9ef452aff8e2dae4e6fb792bd
+[0.2.0]: https://github.com/haiggoh/local-agents/commit/3e8a51b94e2c61a84f57e163f2a337f7a8f724b8
+[0.1.0]: https://github.com/haiggoh/local-agents/commit/f722c5585284b4934a987f7fbc15829f3790d877

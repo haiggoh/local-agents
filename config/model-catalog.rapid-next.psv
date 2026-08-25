@@ -1,0 +1,31 @@
+# Rapid-first language-model acquisition catalog
+#
+# Schema:
+# alias|label|repo|revision|subdir|size_GB|group|status|include_patterns|runtime
+#
+# Acquisition is not qualification or role assignment.
+#
+# Registry-provided baseline, deliberately not duplicated as an active record:
+# qwen-3.8-operator -> mlx-community/Qwen3.8-27B-4bit
+# revision=3e6447f082e89cc7f0bc6e5441afd38dfce760ff
+# subdir=Qwen3.8-27B-4bit
+# Expected downloader state: PRESENT or COMPLETE via config.local.sh.
+#
+# Qwen MTP pairing:
+# - Qwen3.8 MTP 4-bit pairs with the ordinary 4-bit target.
+# - Qwen3.8 MTP 8-bit pairs with the ordinary 8-bit target.
+# - No verified matching MTP sidecar is included for the oQ6 target.
+#
+# Nemotron and Granite are architecture/profiling candidates. Their presence on
+# disk will not imply Rapid compatibility, tool correctness, or tournament admission.
+
+qwen38-27b-oq6|Qwen3.8 27B MLX oQ6 — quality/precision challenger|mlx-community/Qwen3.8-27B-oQ6|1886f315c877be3e6b614ac84c765e356ffb9f00|Qwen3.8-27B-oQ6|23.3|qwen38,target,precision|candidate||rapid-mlx
+qwen38-27b-8bit|Qwen3.8 27B MLX 8-bit — quality-oriented precision challenger|mlx-community/Qwen3.8-27B-8bit|815b83c0df8ffd1d1b5244cf75fd6ef14fca9ef9|Qwen3.8-27B-8bit|29.5|qwen38,target,precision|candidate||rapid-mlx
+qwen38-mtp-4bit|Qwen3.8 27B MTP 4-bit — drafter sidecar for ordinary 4-bit target|mlx-community/Qwen3.8-27B-MTP-4bit|b643c01b6d3b094e325edb6ebd832e16c486c575|Qwen3.8-27B-MTP-4bit|0.259|qwen38,mtp,sidecar|conditional||rapid-mlx
+qwen38-mtp-8bit|Qwen3.8 27B MTP 8-bit — drafter sidecar for ordinary 8-bit target|mlx-community/Qwen3.8-27B-MTP-8bit|e88e48d055732ad75d9435f3059139d5279f2064|Qwen3.8-27B-MTP-8bit|0.471|qwen38,mtp,sidecar|conditional||rapid-mlx
+
+nemotron-nano-4bit|Nemotron 3 Nano 30B-A3B MLX 4-bit — Mamba-2/MoE profiling candidate|mlx-community/NVIDIA-Nemotron-3-Nano-30B-A3B-MLX-4Bit|8e2952a7ad2964fa02fff863c39c252accd95282|NVIDIA-Nemotron-3-Nano-30B-A3B-MLX-4Bit|17.8|nemotron,mamba2,profiling|research||rapid-mlx
+nemotron-nano-6bit|Nemotron 3 Nano 30B-A3B MLX 6-bit — primary quality/profiling candidate|mlx-community/NVIDIA-Nemotron-3-Nano-30B-A3B-MLX-6Bit|4a4bb89e09ee0c194a7932985f5dfd670df531f1|NVIDIA-Nemotron-3-Nano-30B-A3B-MLX-6Bit|25.7|nemotron,mamba2,profiling|research||rapid-mlx
+nemotron-nano-8bit|Nemotron 3 Nano 30B-A3B MLX 8-bit — high-precision control|mlx-community/NVIDIA-Nemotron-3-Nano-30B-A3B-MLX-8Bit|01a26e26237084c0d6096f79a7ceeea0a62da80a|NVIDIA-Nemotron-3-Nano-30B-A3B-MLX-8Bit|33.6|nemotron,mamba2,precision|research||rapid-mlx
+
+granite-h-tiny-6bit|Granite 4.0 H-Tiny MLX 6-bit — compact Mamba-2/MoE engineering control|mlx-community/granite-4.0-h-tiny-6bit-MLX|5763d547dbeb11972d3e4a5f071ef43a92220c54|granite-4.0-h-tiny-6bit-MLX|5.64|granite,mamba2,ksearch|research||rapid-mlx

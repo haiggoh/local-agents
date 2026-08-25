@@ -45,14 +45,43 @@ HERE="$(cd -P "$(dirname "$_s")" && pwd)"
 la_load_config || exit 2
 la_lookup "$ALIAS" >/dev/null 2>&1 || { echo "❌ unknown alias '$ALIAS'" >&2; exit 2; }
 MODEL_DIR="$LA_CUR_DIR"
-OVERHEAD=${LA_RAM_MODEL_OVERHEAD_GB:-6}
+# An explicit override remains authoritative. Otherwise Rapid must budget
+# its configured reusable-cache ceiling in addition to ordinary runtime/KV work.
+if [[ -n ${LA_RAM_MODEL_OVERHEAD_GB+x} ]]; then
+  OVERHEAD=$LA_RAM_MODEL_OVERHEAD_GB
+elif [[ "${LA_CUR_SERVE:-}" = "rapid" ]]; then
+  OVERHEAD=$(LC_ALL=C awk     -v cache_mb="${LA_RAPID_CACHE_MEMORY_MB:-2048}"     'BEGIN{printf "%.1f", 6 + cache_mb/1024}')
+else
+  OVERHEAD=6
+fi
 FLOOR=${LA_RAM_FLOOR_GB:-16}
 PLOW=${LA_PORT_LOW:-8000}; PHIGH=${LA_PORT_HIGH:-8010}
 
 # ---- question 0: is this model already being served? Then nothing new is loaded at all. --------
 for p in $(seq "$PLOW" "$PHIGH"); do
   ids=$(curl -s --max-time 2 "http://localhost:$p/v1/models" 2>/dev/null | grep -o '"id":"[^"]*"' | cut -d'"' -f4)
+  served=0
+
   if [[ -n $ids ]] && grep -qxF "$ALIAS" <<<"$ids"; then
+    served=1
+  elif [[ "${LA_CUR_SERVE:-}" = "rapid" ]]; then
+    meta="$HOME/.claude/logs/local-agents-configs/server_${p}.meta"
+    listener_pid=$(lsof -nP -t -iTCP:"$p" -sTCP:LISTEN 2>/dev/null | head -1)
+    meta_backend=$(awk -F= '$1=="backend"{print substr($0,index($0,"=")+1)}' "$meta" 2>/dev/null)
+    meta_alias=$(awk -F= '$1=="alias"{print substr($0,index($0,"=")+1)}' "$meta" 2>/dev/null)
+    meta_model=$(awk -F= '$1=="model_dir"{print substr($0,index($0,"=")+1)}' "$meta" 2>/dev/null)
+    meta_pid=$(awk -F= '$1=="pid"{print $2}' "$meta" 2>/dev/null)
+
+    if [[ "$meta_backend" = "rapid" &&
+          "$meta_alias" = "$ALIAS" &&
+          "$meta_model" = "$MODEL_DIR" &&
+          -n "$listener_pid" &&
+          "$listener_pid" = "$meta_pid" ]]; then
+      served=1
+    fi
+  fi
+
+  if (( served )); then
     ((QUIET)) || printf '✅ RAM preflight: %s is ALREADY served on port %s — reusing it, no new weights load.\n' "$ALIAS" "$p"
     exit 0
   fi

@@ -43,6 +43,11 @@ fi
 MODEL_SPOOF="${LA_CUR_SPOOF%%,*}"
 EFFORT="${EFFORT_OVERRIDE:-$LA_CUR_EFFORT}"
 EFFORT_FLAG="--effort $EFFORT"
+# Preserve the registry values under backend-neutral local names. The old
+# banner read an unset THINK variable and therefore displayed "off" even
+# when LA_CUR_THINK=true and the server reasoning parser was enabled.
+THINK="$LA_CUR_THINK"
+BACKEND="$LA_CUR_SERVE"
 
 # RAM PREFLIGHT — before any weights load. Booting a model while other servers hold RAM has
 # frozen this machine hard (Terminal AND the force-quit menu became unresponsive), and there is no
@@ -125,6 +130,7 @@ cat <<BANNER
 ║  🖥️  LOCAL SESSION — inference runs on THIS MACHINE, \$0 per token         ║
 ╚══════════════════════════════════════════════════════════════════════════╝
    🤖 model    : ${MODEL_ALIAS}   (presenting as ${MODEL_SPOOF})
+   ⚙️  backend  : ${BACKEND}
    🎚️  effort   : ${EFFORT}
    🧠 thinking : ${_think_label}
    🔌 port     : ${VLLM_PORT}   →  ${ANTHROPIC_BASE_URL}
@@ -185,7 +191,7 @@ AGENT_PROMPT="You are an autonomous AI agent operating directly in a CLI. Do not
 
 # Log which model drives this session (the spoof id is shared across tiers, so the alias lives here).
 mkdir -p "$HOME/.claude/logs"
-echo "$(date '+%Y-%m-%d %H:%M:%S')  alias=$MODEL_ALIAS  spoof=$MODEL_SPOOF effort=$EFFORT  vllm_port=$VLLM_PORT  mode=direct" >> "$HOME/.claude/logs/local-agents-sessions.log"
+echo "$(date '+%Y-%m-%d %H:%M:%S')  alias=$MODEL_ALIAS  spoof=$MODEL_SPOOF effort=$EFFORT  backend=$BACKEND  vllm_port=$VLLM_PORT  mode=direct" >> "$HOME/.claude/logs/local-agents-sessions.log"
 echo "🧭 Session engine: $MODEL_ALIAS  (direct; logged to ~/.claude/logs/local-agents-sessions.log)"
 
 # Record WHICH transcript this session writes, so watchers never have to guess it.

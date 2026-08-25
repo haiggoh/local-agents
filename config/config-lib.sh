@@ -32,7 +32,7 @@ LA_CANONICAL_ROLES="operator reasoner validator utility"
 LA_ALIASES=()
 declare -A LA_SUBDIR LA_SERVE LA_TOOLP LA_REASONP LA_THINK LA_SPOOF LA_EFFORT LA_ROLES LA_REPO LA_SIZE
 
-# la_register <alias> <subdir> <serve:vllm|mlx_lm> <tool_parser> <reasoning_parser>
+# la_register <alias> <subdir> <serve:vllm|rapid|mlx_lm> <tool_parser> <reasoning_parser>
 #             <thinking:true|false> <spoof_id> <effort> [roles] [hf_repo] [size_gb]
 # reasoning_parser may be "" (none). The last three are OPTIONAL and additive, so pre-existing
 # 8-field config lines keep working unchanged:
@@ -89,6 +89,9 @@ la_load_config() {
   # Machine defaults (only set if the config file didn't).
   : "${LA_MODELS_DIR:=$HOME/.models}"
   : "${LA_VENV:=$HOME/.local-llm/bin}"
+  # Rapid-MLX is an independent candidate backend. Keep its executable pinned
+  # to an isolated environment rather than replacing LA_VENV or changing PATH.
+  : "${LA_RAPID_BIN:=$HOME/.venvs/rapid-mlx-0.12.18/bin/rapid-mlx}"
   : "${LA_PORT_START:=8000}"
   : "${LA_PORT_MAX:=8010}"
   : "${LA_MAX_OUTPUT_TOKENS:=8192}"
@@ -142,6 +145,13 @@ la_load_config() {
   # the client retries the whole turn, so 300s of work is discarded before the attempt that succeeds.
   # Derived from LA_API_TIMEOUT_MS so the server and client caps stay in step by default.
   : "${LA_SERVER_TIMEOUT_S:=$(( LA_API_TIMEOUT_MS / 1000 ))}"
+  # Rapid agent profile. These affect only registrations with serve=rapid.
+  # They are explicit so baseline/off experiments can override them per launch.
+  : "${LA_RAPID_CACHE_MEMORY_MB:=2048}"
+  : "${LA_RAPID_HYBRID_CACHE_ENTRIES:=2}"
+  : "${LA_RAPID_PIN_SYSTEM_PROMPT:=true}"
+  : "${LA_RAPID_RELOCATE_MID_SYSTEM:=true}"
+  : "${LA_RAPID_PFLASH:=off}"
   # Optional per-machine extras a user may want the agent prompt to know about (all optional):
   : "${LA_MEMORY_DIR:=}"          # absolute path to your auto-memory dir, if you want the agent told
   : "${LA_COUNCIL_NOTE:=}"        # optional extra line appended to the agent prompt (e.g. a council rule)

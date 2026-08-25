@@ -17,6 +17,10 @@ and with wrapped launchers.
 
 ---
 
+## Project documentation
+
+- [Changelog](CHANGELOG.md) — release history and current unreleased work
+
 ## Two ways to use it
 
 **1. Offload sub-tasks from your cloud session — recommended, what most people want.**
@@ -60,6 +64,13 @@ approach suppressed them).
 - **`bin/la-ram-preflight.sh`** — decides whether a model can load without stalling the machine,
   before any weights are read. Asks three questions cheapest-first (does it fit / are other models
   loaded / are they attached) and stops as soon as the answer is settled.
+- **`bin/la-evict.sh`** — emergency memory-recovery fallback for when the machine is already out of
+  RAM and the terminal is unresponsive. It is **not** ordinary lifecycle management: it evicts **one
+  server at a time** (ranked, least-costly first), escalating one step per repeat invocation, and
+  never touches a server with a live session attached on its first pass. Escalation applies only
+  within the window (default 600 s, `LA_EVICT_WINDOW` to change); once it expires the next invocation
+  is a first run again, and `--reset` clears the saved escalation state and exits without evicting.
+  See [Safety](#safety).
 - **`bin/la-stream-render.py`** — renders a session transcript for a human watcher: thinking as
   clean paragraphs, one concise line per tool call. `local-watch.sh` uses it by default.
 - **`bin/la-disk-inventory.sh`** — disk-first inventory: what's actually in your models dir, and
@@ -424,6 +435,7 @@ Re-apply after any `vllm-mlx` reinstall/upgrade: `git -C <vllm-mlx> apply vllm-m
   keep human approval — a local model is not Anthropic's safety classifier.
 - **No reasoning leakage.** The nudge forbids emitting `<think>` markup / raw chain-of-thought into
   visible output or tool arguments.
+- **`la-evict` is a last resort, and a conservative one.** The escape hatch for when the machine is already out of RAM and the normal lifecycle is unresponsive: it never bulk-kills the roster, never touches a server with a live session on its first pass, and escalates only one step per repeat call inside the window — so a healthy stack is left alone. Deliberately standalone (no `config-lib.sh`, no registry): a fallback that runs while the stack is sick must not depend on the stack.
 
 ## Diagnostics
 

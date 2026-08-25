@@ -16,6 +16,10 @@
 # --- machine settings --------------------------------------------------------
 LA_MODELS_DIR="$HOME/.models"          # where your MLX model directories live
 LA_VENV="$HOME/.local-llm/bin"         # venv with `vllm-mlx` and `python -m mlx_lm`
+LA_RAPID_BIN="$HOME/.venvs/rapid-mlx-0.12.18/bin/rapid-mlx"
+                                       # optional isolated Rapid-MLX backend
+LA_RAPID_CACHE_MEMORY_MB=2048          # conservative shipped ceiling; tune to workload/RAM
+LA_RAPID_HYBRID_CACHE_ENTRIES=2        # retained recurrent/sliding-window snapshots
 LA_PORT_START=8000                     # port scan range for the local server
 LA_PORT_MAX=8010
 LA_MAX_OUTPUT_TOKENS=8192              # native Claude Code output cap for local turns
@@ -66,7 +70,8 @@ LA_COUNCIL_NOTE=""
 #
 #   alias            what a session/dispatch requests (e.g. `launch ... my-operator`)
 #   subdir           directory name under LA_MODELS_DIR
-#   serve            vllm  (vllm-mlx, full Anthropic route)  |  mlx_lm (mlx_lm.server, dispatch-only)
+#   serve            vllm (incumbent Anthropic route) | rapid (Rapid-MLX Anthropic route) |
+#                    mlx_lm (mlx_lm.server, dispatch-only)
 #   tool_parser      vllm-mlx --tool-call-parser: auto|qwen|qwen3_coder|mistral|llama|hermes|
 #                    deepseek|gpt-oss|... (pick the one matching the model's emitted tool format)
 #   reasoning_parser --reasoning-parser (qwen3|deepseek_r1|...) or "" for none

@@ -30,6 +30,7 @@ if [ -z "$MODEL_NAME" ] || ! la_lookup "$MODEL_NAME"; then
 fi
 MODEL_DIR="$LA_CUR_DIR"; SPOOF_NAME="$LA_CUR_SPOOF"; SERVE="$LA_CUR_SERVE"
 TOOLP="$LA_CUR_TOOLP"; REASONP="$LA_CUR_REASONP"; THINK="$LA_CUR_THINK"
+SPOOF_PRIMARY="${SPOOF_NAME%%,*}"
 if [ ! -d "$MODEL_DIR" ]; then echo "❌ model dir not found: $MODEL_DIR (check LA_MODELS_DIR / subdir in config)"; exit 1; fi
 # A directory is not a model. A metadata-only shell (configs + tokenizer, no weights) is left by an
 # aborted download; without this check the server starts and dies at load time with a far less
@@ -74,6 +75,28 @@ for ((port=LA_PORT_START; port<=LA_PORT_MAX; port++)); do
     if lsof -i :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
         CURRENT_IDS=$(curl -s --max-time 4 "http://localhost:$port/v1/models" | grep -o '"id":"[^"]*"' | cut -d'"' -f4)
         CURRENT_MODEL=$(printf '%s\n' "$CURRENT_IDS" | head -n 1)
+
+        # Rapid serves the public spoof id rather than the private registry alias.
+        # Reuse therefore requires our own per-port identity record; otherwise two
+        # different local models sharing claude-opus-5 would be indistinguishable.
+        if [ "$SERVE" = "rapid" ]; then
+            _meta="$CONFIG_DIR/server_${port}.meta"
+            _listener_pid=$(lsof -t -i ":$port" -sTCP:LISTEN 2>/dev/null | head -1)
+            _meta_backend=$(awk -F= '$1=="backend"{print substr($0,index($0,"=")+1)}' "$_meta" 2>/dev/null)
+            _meta_alias=$(awk -F= '$1=="alias"{print substr($0,index($0,"=")+1)}' "$_meta" 2>/dev/null)
+            _meta_model=$(awk -F= '$1=="model_dir"{print substr($0,index($0,"=")+1)}' "$_meta" 2>/dev/null)
+            _meta_pid=$(awk -F= '$1=="pid"{print $2}' "$_meta" 2>/dev/null)
+            if [ "$_meta_backend" = "rapid" ] &&
+               [ "$_meta_alias" = "$MODEL_NAME" ] &&
+               [ "$_meta_model" = "$MODEL_DIR" ] &&
+               [ -n "$_listener_pid" ] &&
+               [ "$_listener_pid" = "$_meta_pid" ] &&
+               printf '%s\n' "$CURRENT_IDS" | grep -qxF "$SPOOF_PRIMARY"; then
+                echo "✅ $MODEL_NAME already healthy via Rapid-MLX on port $port."
+                echo "SUCCESS_PORT=$port"; exit 0
+            fi
+        fi
+
         # If GET already returned an id the process is alive — do NOT probe-kill (a cold heavy model
         # can be slow). Only run a completion probe when GET gave nothing.
         if [ -n "$CURRENT_MODEL" ]; then HEALTH="alive:$CURRENT_MODEL"; else
@@ -111,6 +134,76 @@ done
 [ -z "$TARGET_PORT" ] && { echo "❌ All ports $LA_PORT_START-$LA_PORT_MAX saturated."; exit 1; }
 LOG_FILE="${LOG_FILE_BASE}_${TARGET_PORT}.log"
 
+# --- Rapid-MLX branch ---------------------------------------------------------
+if [ "$SERVE" = "rapid" ]; then
+    if [ ! -x "$LA_RAPID_BIN" ]; then
+        echo "❌ Rapid-MLX executable not found or not executable: $LA_RAPID_BIN" >&2
+        echo "   Set LA_RAPID_BIN in config.local.sh to the pinned isolated executable." >&2
+        exit 1
+    fi
+
+    RAPID_META="$CONFIG_DIR/server_${TARGET_PORT}.meta"
+    RAPID_META_TMP="${RAPID_META}.tmp.$$"
+
+    RAPID_CMD=(
+        "$LA_RAPID_BIN" --no-telemetry
+        serve "$MODEL_DIR"
+        --served-model-name "$SPOOF_PRIMARY"
+        --host 127.0.0.1
+        --port "$TARGET_PORT"
+        --max-num-seqs 1
+        --max-concurrent-requests 2
+        --cache-memory-mb "$LA_RAPID_CACHE_MEMORY_MB"
+        --hybrid-cache-entries "$LA_RAPID_HYBRID_CACHE_ENTRIES"
+        --timeout "$LA_SERVER_TIMEOUT_S"
+        --no-mllm
+        --no-spec-decode
+        --pflash "$LA_RAPID_PFLASH"
+    )
+
+    case "$LA_RAPID_PIN_SYSTEM_PROMPT" in
+        true|1|yes) RAPID_CMD+=(--pin-system-prompt) ;;
+    esac
+    case "$LA_RAPID_RELOCATE_MID_SYSTEM" in
+        true|1|yes) RAPID_CMD+=(--relocate-mid-conversation-system) ;;
+    esac
+
+    # Registry parser names originated with the incumbent vllm-mlx backend.
+    # Translate only known differences; preserve other explicit parser names.
+    RAPID_TOOLP="$TOOLP"
+    case "$RAPID_TOOLP" in
+        qwen|qwen3_coder) RAPID_TOOLP="qwen3_coder_xml" ;;
+    esac
+    if [ -n "$RAPID_TOOLP" ]; then
+        RAPID_CMD+=(--enable-auto-tool-choice --tool-call-parser "$RAPID_TOOLP")
+    fi
+
+    if [ "$THINK" = "true" ]; then
+        RAPID_CMD+=(--reasoning-parser "${REASONP:-qwen3}")
+        RAPID_CMD+=(--default-temperature 0.6 --default-top-p 0.95)
+    else
+        RAPID_CMD+=(--no-thinking --no-reasoning-parser)
+    fi
+
+    echo "🚀 Launching $MODEL_NAME via Rapid-MLX on free port $TARGET_PORT  (🧠 thinking: $THINK)..."
+    RAPID_MLX_TELEMETRY=0 nohup "${RAPID_CMD[@]}" > "$LOG_FILE" 2>&1 &
+    RAPID_PID=$!
+
+    {
+        echo "backend=rapid"
+        echo "alias=$MODEL_NAME"
+        echo "model_dir=$MODEL_DIR"
+        echo "served_id=$SPOOF_PRIMARY"
+        echo "pid=$RAPID_PID"
+    } > "$RAPID_META_TMP"
+    mv -f "$RAPID_META_TMP" "$RAPID_META"
+
+    wait_ready "$TARGET_PORT" "$LOG_FILE" "$MODEL_NAME" "$RAPID_PID" "$SPOOF_PRIMARY"
+    tail -n 12 "$LOG_FILE"
+    echo "SUCCESS_PORT=$TARGET_PORT"
+    exit 0
+fi
+
 # --- mlx_lm.server branch (dispatch-only tiers, e.g. Llama-4 which vllm-mlx misroutes) --------
 if [ "$SERVE" = "mlx_lm" ]; then
     echo "🚀 Launching $MODEL_NAME via mlx_lm.server on free port $TARGET_PORT..."
@@ -136,7 +229,7 @@ TMP_CONFIG="$CONFIG_DIR/vllm_config_${TARGET_PORT}.yaml"
 # ids it will load the weights TWICE (~model-size each) until the memory-budget evictor reclaims
 # the idle one. Harmless in normal use — one client session sends one id for its whole lifetime —
 # but do NOT deliberately mix ids against one port.
-SPOOF_PRIMARY="${SPOOF_NAME%%,*}"          # first = preferred; what wait_ready checks for
+# SPOOF_PRIMARY is resolved before port scanning so every backend can use it.
 {
   echo "manager:"
   echo "  memory_budget_gb: $LA_MEMORY_BUDGET_GB"
