@@ -111,3 +111,9 @@ la_role reasoner  qwen-3.6-thinking     high   both      # thinking flavor (same
 la_role reasoner  deepseek-r1-architect max    both      # A/B reasoner — strongest local reasoner
 la_role validator deepseek-r1-architect max    dispatch  # independent review — dispatch (no tool_calls)
 la_role utility   llama-scout           low    dispatch  # cheap classification — dispatch-only
+# Optional per-launch Claude Code profile controls. Environment variables passed
+# to one launch override these defaults. Leave empty for existing behavior.
+LA_AGENT_PROMPT_FILE=""    # default: config/local-agent-system-prompt.txt
+LA_CLAUDE_SETTINGS=""      # path to a validated Claude Code settings JSON
+LA_CLAUDE_TOOLS=""         # comma-separated built-in tools, e.g. Bash,Read,Edit
+LA_AUTO_COMPACT_WINDOW=""  # auto or 100k–1m; passed only to this local session

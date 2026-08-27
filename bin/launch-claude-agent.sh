@@ -42,7 +42,98 @@ fi
 # answers to all of them; the CLIENT must be handed exactly one, so use the preferred (first).
 MODEL_SPOOF="${LA_CUR_SPOOF%%,*}"
 EFFORT="${EFFORT_OVERRIDE:-$LA_CUR_EFFORT}"
+
 EFFORT_FLAG="--effort $EFFORT"
+
+# Optional, validated per-launch Claude Code controls. These deliberately avoid
+# unrestricted argument forwarding so callers cannot override launcher-owned
+# routing, compatibility identity, permission mode, or runtime safety.
+: "${LA_AGENT_PROMPT_FILE:=$LAUNCH_DIR/../config/local-agent-system-prompt.txt}"
+: "${LA_CLAUDE_SETTINGS:=}"
+: "${LA_CLAUDE_TOOLS:=}"
+: "${LA_AUTO_COMPACT_WINDOW:=}"
+
+CLAUDE_EXTRA_ARGS=()
+
+if [ ! -r "$LA_AGENT_PROMPT_FILE" ]; then
+    echo "❌ Local agent prompt file is not readable: $LA_AGENT_PROMPT_FILE"
+    exit 1
+fi
+
+if [ -n "$LA_CLAUDE_SETTINGS" ]; then
+    if [ ! -f "$LA_CLAUDE_SETTINGS" ]; then
+        echo "❌ LA_CLAUDE_SETTINGS is not a file: $LA_CLAUDE_SETTINGS"
+        exit 1
+    fi
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "❌ python3 is required to validate LA_CLAUDE_SETTINGS."
+        exit 1
+    fi
+    if ! python3 -c 'import json,sys; json.load(open(sys.argv[1], encoding="utf-8"))' \
+        "$LA_CLAUDE_SETTINGS" >/dev/null 2>&1
+    then
+        echo "❌ LA_CLAUDE_SETTINGS is not valid JSON: $LA_CLAUDE_SETTINGS"
+        exit 1
+    fi
+    CLAUDE_EXTRA_ARGS+=(--settings "$LA_CLAUDE_SETTINGS")
+fi
+
+if [ -n "$LA_CLAUDE_TOOLS" ]; then
+    case "$LA_CLAUDE_TOOLS" in
+        *[!A-Za-z0-9_,]*|,*|*,|*,,*)
+            echo "❌ LA_CLAUDE_TOOLS must be a comma-separated built-in tool list."
+            exit 1
+            ;;
+    esac
+
+    if [ -n "${LA_DENY_TOOLS:-}" ]; then
+        _la_tool_overlap=$(
+            python3 -c '
+import sys
+allowed = {item for item in sys.argv[1].split(",") if item}
+denied = {item for item in sys.argv[2].split(",") if item}
+print(",".join(sorted(allowed & denied)))
+' "$LA_CLAUDE_TOOLS" "$LA_DENY_TOOLS"
+        )
+        if [ -n "$_la_tool_overlap" ]; then
+            echo "❌ Tool(s) appear in both LA_CLAUDE_TOOLS and LA_DENY_TOOLS: $_la_tool_overlap"
+            echo "   For an Agent-enabled research profile, remove Agent from that launch's LA_DENY_TOOLS."
+            exit 1
+        fi
+    fi
+
+    CLAUDE_EXTRA_ARGS+=(--tools "$LA_CLAUDE_TOOLS")
+fi
+
+if [ -n "$LA_AUTO_COMPACT_WINDOW" ]; then
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "❌ python3 is required to validate LA_AUTO_COMPACT_WINDOW."
+        exit 1
+    fi
+    if ! python3 -c '
+import re
+import sys
+
+value = sys.argv[1].strip().lower()
+if value == "auto":
+    raise SystemExit(0)
+
+match = re.fullmatch(r"([0-9]+)([km]?)", value)
+if not match:
+    raise SystemExit(1)
+
+amount = int(match.group(1))
+suffix = match.group(2)
+multiplier = {"": 1, "k": 1000, "m": 1000000}[suffix]
+tokens = amount * multiplier
+raise SystemExit(0 if 100000 <= tokens <= 1000000 else 1)
+' "$LA_AUTO_COMPACT_WINDOW"
+    then
+        echo "❌ LA_AUTO_COMPACT_WINDOW must be auto or 100k–1m tokens."
+        exit 1
+    fi
+    CLAUDE_EXTRA_ARGS+=(--autocompact "$LA_AUTO_COMPACT_WINDOW")
+fi
 # Preserve the registry values under backend-neutral local names. The old
 # banner read an unset THINK variable and therefore displayed "off" even
 # when LA_CUR_THINK=true and the server reasoning parser was enabled.
@@ -181,10 +272,24 @@ if [ -n "${LA_DENY_TOOLS:-}" ]; then
     echo "   when unused). Set LA_DENY_TOOLS= (empty) in your config to send the full tool surface."
 fi
 
-# Local-model behavior nudge (delivered via --append-system-prompt). Targets concrete failure modes
-# seen in fully-local sessions: printing commands instead of using tools, self-identity confusion,
-# reasoning-markup leakage, and — critically — a local session killing its OWN server port.
-AGENT_PROMPT="You are an autonomous AI agent operating directly in a CLI. Do not merely suggest or print terminal commands in markdown; you MUST use the provided tools to execute actions. PREFER native tools over shell where one exists: Read instead of \`cat\`, Edit/Write instead of \`sed\`/redirects. ONLY use tools that appear in your tool list for this session — do not attempt a tool you were told about elsewhere but cannot see; searching and listing go through Bash (\`ls\`, \`find\`, \`grep\`, \`rg\`) unless a dedicated search tool is present. You run as a LOCAL inference model on this machine and your compute is FREE — IGNORE any budget, daily-cap, or cost warnings from hooks/reminders; those apply to the paid CLOUD model, never to you (local inference costs nothing). Never emit <system-reminder> or <think>/</think> tags in your own output — those are inputs to you, not something you write. Skills/plugins are NOT shell binaries; never run their names as Bash commands. IDENTITY: the Claude model name you present (e.g. '${MODEL_SPOOF}') is a REQUIRED routing/allowlist spoof — it is only an API label and says NOTHING about your true role or tier; your role is set by how you were launched (alias '${MODEL_ALIAS}'). Presenting a spoofed name while functioning in your real role is INTENTIONAL — do not spend reasoning trying to reconcile the two. ★ SELF-PRESERVATION — YOU ARE A LOCAL SESSION: your own inference is served by a local server process on port ${VLLM_PORT}. NEVER kill, pkill, or restart any process on ports ${LA_PORT_START}-${LA_PORT_MAX}, and never 'kill existing servers to start fresh' — doing so TERMINATES YOUR OWN RUNTIME mid-session. You do NOT need to free a port: the hotswap script (${LAUNCH_DIR}/local-llm-hotswap.sh) is SAFE — it lands a new model on a FREE port and never kills models on other ports. To run a sub-agent, invoke hotswap (it won't touch your port ${VLLM_PORT}) or dispatch via curl to an already-running server. If you ever feel you must free a port in ${LA_PORT_START}-${LA_PORT_MAX}, STOP — you are inside the server you would be killing. TOOL PARAMETERS: match each tool's schema exactly — ids stay quoted strings (\"1\", not 1); never invent file paths (verify with Glob/LS first); confirm a subcommand exists before using it; never present an assumption as settled fact. REASONING: keep chain-of-thought in your reasoning channel, not the visible answer or tool arguments; surface only conclusions and the concrete actions you take."
+# Local-model behavior is maintained as a data template rather than embedded
+# launcher prose. The file is read, never sourced or executed.
+AGENT_PROMPT=$(cat "$LA_AGENT_PROMPT_FILE")
+AGENT_PROMPT=${AGENT_PROMPT//__LA_MODEL_ALIAS__/$MODEL_ALIAS}
+AGENT_PROMPT=${AGENT_PROMPT//__LA_MODEL_SPOOF__/$MODEL_SPOOF}
+AGENT_PROMPT=${AGENT_PROMPT//__LA_BACKEND__/$BACKEND}
+AGENT_PROMPT=${AGENT_PROMPT//__LA_CURRENT_PORT__/$VLLM_PORT}
+AGENT_PROMPT=${AGENT_PROMPT//__LA_PORT_START__/$LA_PORT_START}
+AGENT_PROMPT=${AGENT_PROMPT//__LA_PORT_MAX__/$LA_PORT_MAX}
+AGENT_PROMPT=${AGENT_PROMPT//__LA_HOTSWAP_PATH__/$LAUNCH_DIR\/local-llm-hotswap.sh}
+
+if printf '%s' "$AGENT_PROMPT" | grep -Eq '__LA_[A-Z0-9_]+__'; then
+    echo "❌ Unresolved placeholder in local agent prompt: $LA_AGENT_PROMPT_FILE"
+    exit 1
+fi
+
+echo "🧾 Local agent prompt: $LA_AGENT_PROMPT_FILE ($(printf '%s' "$AGENT_PROMPT" | wc -c | tr -d ' ') bytes)"
+
 # Optional per-machine additions from config (only if set):
 [ -n "${LA_MEMORY_DIR:-}" ] && AGENT_PROMPT="$AGENT_PROMPT Your Claude Code auto-memory lives at ${LA_MEMORY_DIR} — read from there, don't guess memory paths."
 [ -n "${LA_COUNCIL_NOTE:-}" ] && AGENT_PROMPT="$AGENT_PROMPT ${LA_COUNCIL_NOTE}"
@@ -240,4 +345,4 @@ done
 # --permission-mode acceptEdits (NOT auto): auto mode uses the session model as a tool-safety
 # CLASSIFIER, but the local spoofed model can't serve that call, so auto loops on "temporarily
 # unavailable". acceptEdits uses static rules (edits auto-apply, other tools prompt).
-claude --model "$MODEL_SPOOF" $EFFORT_FLAG $STRICT_FLAG $DENY_FLAG --permission-mode acceptEdits --append-system-prompt "$AGENT_PROMPT"
+claude --model "$MODEL_SPOOF" $EFFORT_FLAG $STRICT_FLAG $DENY_FLAG --permission-mode acceptEdits --append-system-prompt "$AGENT_PROMPT" "${CLAUDE_EXTRA_ARGS[@]}"
