@@ -46,7 +46,8 @@ approach suppressed them).
 ## What's in the box
 
 - **`bin/launch-claude-agent.sh`** — start an interactive local Claude Code session (hotswaps a
-  model onto a free port, sets direct-routing env, injects a self-preservation + tool-use nudge).
+  model onto a free port, sets direct-routing env, and renders the external local-session prompt
+  template with actual model/backend/port metadata).
 - **`bin/local-llm-hotswap.sh`** — land a registered model on the first free port; safe (never kills
   a healthy model on another port); bounded readiness with diagnostics.
 - **`bin/local-agent-dispatch.py`** — universal local model dispatcher, independent of any AI client
@@ -54,7 +55,7 @@ approach suppressed them).
   streams live tokens back to stdout. Install the shell aliases and symlink with `install/setup-shortcuts.sh`
   (or add them manually — see [Local Agent Dispatch](#local-agent-dispatch) below).
 - **`bin/csl`** — menu front-end built from your configured aliases.
-- **`config/`** — the overlay: `config.example.sh` (template) + your gitignored `config.local.sh`.
+- **`config/`** — the overlay: `config.example.sh`, the shipped `local-agent-system-prompt.txt` template, and your gitignored `config.local.sh`.
 - **`install/`** — `install-backend.sh` (venv + vllm-mlx + fork patches), `download-models.sh`
   (the downloader ENGINE: revisions, resume, dedupe, selective GGUF files, disk preflight),
   and `vllm-mlx-local-fork-patches.patch`.
@@ -265,6 +266,66 @@ the change afterwards is ordinary shipping discipline, so this plugin deliberate
 ./bin/csl                                                 # interactive picker (see below)
 ./bin/new-local-window.sh my-operator                     # open it in a NEW, independent Terminal window (macOS)
 ```
+
+### Per-launch profiles for full local sessions
+
+`launch-claude-agent.sh` owns the local routing invariants: the compatibility model id, direct
+localhost endpoint, `acceptEdits` permission mode, RAM preflight, server lifecycle, strict-MCP
+default, and the local runtime-safety prompt. Four optional environment variables let one launch
+narrow its Claude Code profile without unrestricted argument forwarding or persistent changes to
+global Claude Code settings:
+
+| Variable | Purpose |
+|---|---|
+| `LA_CLAUDE_SETTINGS` | Path to an additional Claude Code settings JSON file. The launcher validates it as JSON and passes it through `--settings` for this launch only. |
+| `LA_CLAUDE_TOOLS` | Comma-separated built-in tool list passed through `--tools`, for example `Bash,Read,Grep,Glob,Edit,Write,Skill,AskUserQuestion`. |
+| `LA_AUTO_COMPACT_WINDOW` | Per-launch auto-compaction window: `auto`, or an explicit value from `100k` through `1m`. It does not write the user-global setting. |
+| `LA_AGENT_PROMPT_FILE` | Override for the model-facing local-session prompt template. Defaults to `config/local-agent-system-prompt.txt`. |
+
+Example lean local session:
+
+```bash
+LA_CLAUDE_SETTINGS="$HOME/.claude/launch-profiles/lean-local-general.json" \
+LA_CLAUDE_TOOLS="Bash,Read,Grep,Glob,Edit,Write,Skill,AskUserQuestion" \
+LA_AUTO_COMPACT_WINDOW="100k" \
+  ./bin/launch-claude-agent.sh qwen-3.8-rapid-operator high
+```
+
+The settings file in that example is user-managed and is not shipped by this repository. It can
+scope plugins, workflows, and other Claude Code settings for one launch without modifying
+`~/.claude/settings.json`.
+
+The launcher validates these controls before model startup:
+
+- `LA_CLAUDE_SETTINGS` must name a readable file containing valid JSON.
+- `LA_CLAUDE_TOOLS` must be a comma-separated built-in tool list.
+- A tool may not appear in both `LA_CLAUDE_TOOLS` and `LA_DENY_TOOLS`; conflicting profiles fail
+  closed instead of silently producing an ambiguous tool surface.
+- `LA_AUTO_COMPACT_WINDOW` must be `auto` or resolve to 100,000–1,000,000 tokens.
+- `LA_AGENT_PROMPT_FILE` must be readable; known placeholders are substituted, and any
+  unresolved `__LA_*__` placeholder causes the launch to fail.
+
+The shipped prompt template records the actual local alias and backend, explains that the Claude
+model name is only a compatibility label, marks local inference as zero gateway cost, requires use
+of the available tools, and protects every configured serving port from being killed by its own
+session. The launcher reads the prompt as data—it never sources or executes the file—and replaces
+only these placeholders:
+
+```text
+__LA_MODEL_ALIAS__
+__LA_MODEL_SPOOF__
+__LA_BACKEND__
+__LA_CURRENT_PORT__
+__LA_PORT_START__
+__LA_PORT_MAX__
+__LA_HOTSWAP_PATH__
+```
+
+Machine-local `LA_MEMORY_DIR` and `LA_COUNCIL_NOTE` additions are appended afterward when configured.
+
+These controls do not change the permission-mode boundary: ordinary local sessions still use
+`acceptEdits`. Enabling the `Agent` tool does not by itself make Auto Mode work with a spoofed local
+model; classifier routing remains a separate qualification and safety problem.
 
 ### The picker: why a session is chosen differently from a dispatch
 
@@ -483,12 +544,13 @@ Re-apply after any `vllm-mlx` reinstall/upgrade: `git -C <vllm-mlx> apply vllm-m
   What remains is the ~13–20k-token context block, re-prefilled on **every** turn even on a cache hit
   (`cache HIT: reusing 62223 cached tokens` followed by `prefilling 19357 new tokens`). Dispatch sends a
   prompt three orders of magnitude smaller, which is why it feels instant — prefer it for focused work.
-- **`Glob` / `Grep` are not missing — this Claude Code build has no such tools.** Its built-in set is 28
-  tools (`Bash`, `Read`, `Edit`, `Write`, `Skill`, `Task*`, `Web*`, …); file search goes through `Bash`.
-  A local session is therefore no worse equipped than a cloud one. This mattered because the launcher's
-  own agent prompt used to instruct the model to "use Glob/LS instead of ls/find, Grep instead of grep" —
-  naming three tools it could not see, which wastes a local model's reasoning on tools that will never
-  appear. The prompt now tells it to use only what is in its actual tool list.
+- **Use only tools present in the current session.** Claude Code’s built-in tool set varies by
+  client version and launch profile. In the live Claude Code 2.1.246 acceptance test, `Glob`,
+  `Grep`, `Read`, `Write`, `Edit`, and `Bash` all worked in a local Qwen3.8 Rapid session.
+  `LA_CLAUDE_TOOLS` can select the intended built-in surface for one launch, while
+  `LA_DENY_TOOLS` removes definitions that should not enter the local prompt. Do not copy an old
+  tool inventory into the model-facing prompt as permanent truth; inspect the actual session tool
+  list instead.
 - **A tool is missing in a local session** — `LA_STRICT_MCP` defaults to `true`, so MCP-provided tools
   are deliberately absent (the launcher prints this at startup). Set `LA_STRICT_MCP=false` to restore
   them, accepting ~23k more prefill tokens per cache miss.

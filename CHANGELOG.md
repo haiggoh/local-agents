@@ -8,6 +8,49 @@ Where no Git tag exists, the release heading links directly to its release commi
 
 ## [Unreleased]
 
+### Added
+
+- Add validated per-launch Claude Code controls for full local sessions:
+  `LA_CLAUDE_SETTINGS`, `LA_CLAUDE_TOOLS`, `LA_AUTO_COMPACT_WINDOW`, and
+  `LA_AGENT_PROMPT_FILE`.
+- Add `config/local-agent-system-prompt.txt` as a versioned, model-facing local-session prompt
+  template with runtime placeholder substitution.
+- Add focused launcher-profile tests covering the new controls, argument quoting, prompt
+  placeholders, prompt-size bounds, and allowed/denied tool conflict protection.
+
+### Changed
+
+- Move the local identity, tool-use, zero-gateway-cost, and runtime self-preservation instructions
+  out of `launch-claude-agent.sh` and into the external prompt template.
+- Validate settings JSON, tool-list syntax, auto-compaction bounds, prompt readability, and
+  unresolved prompt placeholders before launching Claude Code.
+- Preserve launcher-owned invariants—direct localhost routing, compatibility model identity,
+  `acceptEdits`, RAM preflight, server lifecycle, and strict-MCP behavior—rather than forwarding
+  arbitrary Claude Code arguments.
+- Fail closed when the same tool appears in both `LA_CLAUDE_TOOLS` and `LA_DENY_TOOLS`.
+
+### Validated experimentally
+
+- Claude Code 2.1.246 running Qwen3.8 27B 4-bit through Rapid-MLX accepted a per-launch settings
+  overlay, an explicit eight-tool profile, strict MCP exclusion, and a 100K auto-compaction window.
+- The interactive acceptance test completed native `Glob`, `Write`, `Read`, `Grep`, `Edit`, and
+  `Bash` operations, preserved native transcript/resume behavior, removed its disposable test
+  artifact, and exited cleanly without changing the implementation worktree.
+- The lean profile began at approximately 24K context with 3.4K system-tool tokens, compared with
+  approximately 28.4K context and 6.7K system-tool tokens in the earlier broader local baseline.
+  This is an operational comparison, not a controlled performance benchmark.
+
+### Known limitations
+
+- Local sessions still use `acceptEdits`; the Auto Mode classifier path for spoofed local models
+  remains unresolved.
+- Exposing the `Agent` tool does not by itself repair local Auto Mode classifier routing.
+- Claude Code and the current status-line renderer still display the compatibility model identity,
+  a fictional cloud-price estimate, and a percentage derived from the spoofed model window rather
+  than the effective local auto-compaction policy.
+- The detached transcript-correlation helper can outlive the Claude client until its polling
+  deadline. Lifecycle cleanup for that helper remains separate follow-up work.
+
 ## [0.13.0] — 2026-08-25
 
 ### Added
