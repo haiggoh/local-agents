@@ -446,6 +446,7 @@ Re-apply after any `vllm-mlx` reinstall/upgrade: `git -C <vllm-mlx> apply vllm-m
 | `cancellation-matrix.py --port <p>` | Does a client disconnect/timeout retire the generation (freeing the single slot) rather than block the next request? |
 | `check-tool-roundtrip.py` | After a local session, verifies the native tool round-trip (call → result → answer → transcript) with no markup leak. |
 | `auto-mode-probe.sh` | Whether Claude Code's Auto Mode classifier request reaches the local endpoint (and where it routes). |
+| `local-inference-readonly-inventory.zsh` | Read-only, offline snapshot of the whole stack — venv, backends, model dirs, servers, ports, fork patches. Writes one timestamped report directory under `~/.claude/reports` and nothing else: no sudo, no network (it forces `HF_HUB_OFFLINE`/`PIP_NO_INDEX`), no weights loaded, no service started or stopped, and it refuses to overwrite an existing report path. Reach for it when you need to describe the stack's state without changing it. |
 
 ## Troubleshooting
 
