@@ -75,6 +75,10 @@ approach suppressed them).
   clean paragraphs, one concise line per tool call. `local-watch.sh` uses it by default.
 - **`bin/la-disk-inventory.sh`** — disk-first inventory: what's actually in your models dir, and
   whether any catalog or the registry accounts for it (catches orphans and metadata-only shells).
+- **`bin/model-asset-override.sh`** — build an isolated *symlink-farm* view of a model directory so
+  you can add or shadow individual non-weight assets (a missing `video_preprocessor_config.json`, a
+  patched `config.json`, an upstream `chat_template.jinja`) for kilobytes instead of duplicating tens
+  of gigabytes of weights.
 - **`config/model-catalog.psv`** — the default download list (data, not code); your private one goes
   in `config/model-catalog.local.psv`.
 - **`bin/new-local-window.sh`** — open a full local session in a new, independent Terminal window (macOS).
