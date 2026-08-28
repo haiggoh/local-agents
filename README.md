@@ -456,7 +456,13 @@ Re-apply after any `vllm-mlx` reinstall/upgrade: `git -C <vllm-mlx> apply vllm-m
 
 - **Model won't load / `hotswap` times out** — check the log tail it prints; confirm the model dir
   exists and matches your `la_register` subdir; ensure enough free RAM.
-- **HF downloads hang** — some networks black-hole the CDN's IPv6; force IPv4 or switch networks.
+- **HF downloads hang** — some networks black-hole the CDN's IPv6 and `hf` sits in `SYN_SENT`
+  at 0 bytes. Force IPv4 with the shim that ships here, or switch networks:
+  ```sh
+  PYTHONPATH="$CLAUDE_PLUGIN_ROOT/install/hf-ipv4:$PYTHONPATH" ./install/download-models.sh ...
+  ```
+  `install/hf-ipv4/sitecustomize.py` is picked up automatically by any Python on that path and
+  pins address resolution to IPv4; it affects only processes you launch with it.
 - **Direct request 500s "System message must be at the beginning"** — the fork patch isn't applied;
   re-apply `vllm-mlx-local-fork-patches.patch`.
 - **Interactive turns are slow** — the cost is *prefill*, not generation, and the prompt is mostly
