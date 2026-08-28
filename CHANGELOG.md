@@ -8,6 +8,24 @@ Where no Git tag exists, the release heading links directly to its release commi
 
 ## [Unreleased]
 
+### Added — machine-local scripts adopted into the plugin
+
+Four helpers that had been living in `~/.claude/scripts` on a single machine now ship with the
+plugin. Each was checked for universality first: no hardcoded user paths, no dependency on this
+machine's gateway or corporate tooling. Deliberately **no version bump here** — these fold into the
+next release rather than shipping alone.
+
+- `bin/local-inference-readonly-inventory.zsh` — offline, read-only snapshot of the whole stack,
+  written to one timestamped report directory. Complements `bin/la-disk-inventory.sh` (disk →
+  registry accounting) rather than duplicating it.
+- `bin/model-asset-override.sh` — symlink-farm view of a model directory, to add or shadow a single
+  non-weight asset without copying the weights.
+- `install/local-stack-update-check.sh` — notify-only weekly check for newer `mlx-vlm`/`mlx-lm`.
+  Upgrades stay manual: the venv is shared and the `vllm-mlx` fork carries local patches.
+- `install/hf-ipv4/sitecustomize.py` — the IPv4 shim that `install/download-models.sh` and the README
+  troubleshooting section **already told you to use**, but which shipped nowhere. The README now
+  gives the exact `PYTHONPATH` invocation.
+
 ## [0.13.0] — 2026-08-25
 
 ### Added
