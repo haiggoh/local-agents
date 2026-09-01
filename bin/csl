@@ -22,8 +22,6 @@ LAUNCHER="${CSL_LAUNCHER:-$CSL_DIR/launch-claude-agent.sh}"
 WATCHER="$CSL_DIR/local-watch.sh"
 
 if [ "${1:-}" = "roles" ]; then shift; exec "$CSL_DIR/la-roles.sh" "$@"; fi
-if [ "$#" -gt 0 ]; then exec "$LAUNCHER" "$@"; fi
-
 # shellcheck source=/dev/null
 . "$CSL_DIR/../config/config-lib.sh"
 la_load_config || exit 1
@@ -32,6 +30,25 @@ EFFORTS=(low medium high xhigh max)     # claude --effort <level>
 # Watcher defaults OFF: ordinary selection should open only the requested local session.
 # Toggle it with `w`, or set CSL_WATCH=1 to opt in by default.
 WATCH="${CSL_WATCH:-0}"
+
+# Apply a model-specific auto-compaction override only inside this csl process.
+# The export is inherited by the selected local launcher but cannot propagate
+# back into the parent shell or into an independently launched cloud session.
+_apply_session_profile() {
+  local alias="$1"
+  local auto_compact="${LA_SESSION_AUTO_COMPACT[$alias]:-}"
+
+  if [ -n "$auto_compact" ]; then
+    export LA_AUTO_COMPACT_WINDOW="$auto_compact"
+  fi
+}
+
+# Argument passthrough still skips the picker and watcher. It now receives the
+# same selected-model profile as an interactive numbered choice.
+if [ "$#" -gt 0 ]; then
+  _apply_session_profile "$1"
+  exec "$LAUNCHER" "$@"
+fi
 
 # Session-capable models only — dispatch-only tiers have no Anthropic /v1/messages surface, so
 # they cannot drive an interactive session at all. mlx_lm.server serves OpenAI-only under a path
@@ -82,6 +99,7 @@ _pick_from() {   # $1=prompt  $2=default index (1-based)  rest=items -> echoes c
 
 _launch() {  # $1=alias  $2=effort(optional)
   local alias="$1" effort="${2:-}"
+  _apply_session_profile "$alias"
   if [ "$WATCH" = "1" ]; then
     if [ "$(uname -s)" = "Darwin" ]; then
       # $$ is THIS shell's pid, and `exec` below replaces it with the launcher — so the pid the

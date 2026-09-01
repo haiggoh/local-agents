@@ -62,6 +62,9 @@ LA_MLX_BACKENDS="rapid vllm mlx_lm"
 # Parallel arrays keyed by insertion; la_lookup fills LA_* vars for a given alias.
 LA_ALIASES=()
 declare -A LA_SUBDIR LA_SERVE LA_SERVE_DECLARED LA_TOOLP LA_REASONP LA_THINK LA_SPOOF LA_EFFORT LA_ROLES LA_REPO LA_SIZE
+# Optional per-alias Claude Code auto-compaction overrides. csl applies
+# these only to the selected model's child launcher process.
+declare -A LA_SESSION_AUTO_COMPACT
 
 # la_register <alias> <subdir> <serve:mlx|rapid|vllm|mlx_lm|llama_cpp> <tool_parser> <reasoning_parser>
 #             <thinking:true|false> <spoof_id> <effort> [roles] [hf_repo] [size_gb]
