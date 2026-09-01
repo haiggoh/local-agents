@@ -133,6 +133,10 @@ releases and only *notifies* — it never installs.
   clean paragraphs, one concise line per tool call. `local-watch.sh` uses it by default.
 - **`bin/la-disk-inventory.sh`** — disk-first inventory: what's actually in your models dir, and
   whether any catalog or the registry accounts for it (catches orphans and metadata-only shells).
+- **`bin/model-asset-override.sh`** — build an isolated *symlink-farm* view of a model directory so
+  you can add or shadow individual non-weight assets (a missing `video_preprocessor_config.json`, a
+  patched `config.json`, an upstream `chat_template.jinja`) for kilobytes instead of duplicating tens
+  of gigabytes of weights.
 - **`config/model-catalog.psv`** — the default download list (data, not code); your private one goes
   in `config/model-catalog.local.psv`.
 - **`bin/new-local-window.sh`** — open a full local session in a new, independent Terminal window (macOS).
@@ -504,12 +508,19 @@ Re-apply after any `vllm-mlx` reinstall/upgrade: `git -C <vllm-mlx> apply vllm-m
 | `cancellation-matrix.py --port <p>` | Does a client disconnect/timeout retire the generation (freeing the single slot) rather than block the next request? |
 | `check-tool-roundtrip.py` | After a local session, verifies the native tool round-trip (call → result → answer → transcript) with no markup leak. |
 | `auto-mode-probe.sh` | Whether Claude Code's Auto Mode classifier request reaches the local endpoint (and where it routes). |
+| `local-inference-readonly-inventory.zsh` | Read-only, offline snapshot of the whole stack — venv, backends, model dirs, servers, ports, fork patches. Writes one timestamped report directory under `~/.claude/reports` and nothing else: no sudo, no network (it forces `HF_HUB_OFFLINE`/`PIP_NO_INDEX`), no weights loaded, no service started or stopped, and it refuses to overwrite an existing report path. Reach for it when you need to describe the stack's state without changing it. |
 
 ## Troubleshooting
 
 - **Model won't load / `hotswap` times out** — check the log tail it prints; confirm the model dir
   exists and matches your `la_register` subdir; ensure enough free RAM.
-- **HF downloads hang** — some networks black-hole the CDN's IPv6; force IPv4 or switch networks.
+- **HF downloads hang** — some networks black-hole the CDN's IPv6 and `hf` sits in `SYN_SENT`
+  at 0 bytes. Force IPv4 with the shim that ships here, or switch networks:
+  ```sh
+  PYTHONPATH="$CLAUDE_PLUGIN_ROOT/install/hf-ipv4:$PYTHONPATH" ./install/download-models.sh ...
+  ```
+  `install/hf-ipv4/sitecustomize.py` is picked up automatically by any Python on that path and
+  pins address resolution to IPv4; it affects only processes you launch with it.
 - **Direct request 500s "System message must be at the beginning"** — the fork patch isn't applied;
   re-apply `vllm-mlx-local-fork-patches.patch`.
 - **Interactive turns are slow** — the cost is *prefill*, not generation, and the prompt is mostly

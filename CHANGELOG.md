@@ -8,6 +8,34 @@ Where no Git tag exists, the release heading links directly to its release commi
 
 ## [Unreleased]
 
+## [0.13.2] — 2026-09-01
+
+### Added — machine-local scripts adopted into the plugin
+
+Four helpers that had been living in `~/.claude/scripts` on a single machine now ship with the
+plugin. Each was checked for universality first: no hardcoded user paths, no dependency on this
+machine's gateway or corporate tooling. These were authored deliberately WITHOUT a version bump, to
+fold into the next release rather than ship alone — this is that release.
+
+- `bin/local-inference-readonly-inventory.zsh` — offline, read-only snapshot of the whole stack,
+  written to one timestamped report directory. Complements `bin/la-disk-inventory.sh` (disk →
+  registry accounting) rather than duplicating it.
+- `bin/model-asset-override.sh` — symlink-farm view of a model directory, to add or shadow a single
+  non-weight asset without copying the weights.
+- `install/local-stack-update-check.sh` — notify-only weekly check, now covering **two**
+  environments: the legacy `~/.local-llm` lane (`mlx-vlm`, `mlx-lm`) and the newest
+  `~/.venvs/rapid-mlx-*` (`rapid-mlx`, `mlx`, `mlx-lm`). Rapid became the default backend in
+  `0.13.1` while being watched by nothing at all, which is the actual reason "who owns the venv
+  update schedule" kept coming up. `mlx` is included on purpose: it is the Metal layer the
+  memory-ceiling evidence is measured on, and the one dependency Homebrew's `rapid-mlx` formula
+  declines to pin — which is why the pinned venv exists. Newest env is chosen by `sort -V`, since a
+  lexical sort ranks `0.9.14` above `0.13.2`. Both log branches print the CHECKED set, so a silently
+  skipped environment can no longer read like one that passed. Upgrades stay manual: the legacy venv
+  is shared, the `vllm-mlx` fork carries local patches, and the Rapid envs are pinned on purpose.
+- `install/hf-ipv4/sitecustomize.py` — the IPv4 shim that `install/download-models.sh` and the README
+  troubleshooting section **already told you to use**, but which shipped nowhere. The README now
+  gives the exact `PYTHONPATH` invocation.
+
 ## [0.13.1] — 2026-08-31
 
 Rapid-MLX becomes the DEFAULT backend for MLX model launches. `0.13.0` made it *available*; this
@@ -92,6 +120,7 @@ backend for GGUF artifacts, and vllm-mlx remains fully supported as an explicit 
   deliberately REUSES a healthy matching server. That opt-out is unbuilt.
 - The RAM preflight's Rapid overhead formula (`6 GB + cache_mb/1024`) models a single sequence, so
   it would understate load if the concurrency caps were ever raised.
+
 
 ## [0.13.0] — 2026-08-25
 
