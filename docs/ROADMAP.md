@@ -16,7 +16,14 @@ version. Nothing is deleted for being inconvenient. If an item is abandoned, it 
 
 ## Current released version
 
-`0.13.4`. See `CHANGELOG.md`.
+`0.13.6`. See `CHANGELOG.md`.
+
+> Keeping this line correct is the smallest possible test of whether this file is being maintained.
+> If it disagrees with `.claude-plugin/plugin.json`, treat everything below as suspect too.
+
+Versions `0.13.1`–`0.13.5` consolidated four outstanding feature branches into `main` on 2026-09-01,
+so `0.14.0` Phase A reconciles one base rather than five divergent branches. `0.13.6` then applied a
+skill fix on top — and correctly declined to take `0.14.0` for it, which is this file working.
 
 `0.13.x` is deliberately being used for feature work that would conventionally earn a minor bump.
 **The version number is the release gate for `0.14.0`:** that number is reserved for the runtime
@@ -28,7 +35,7 @@ un-released. Patch-level bumps below it are the cost of keeping that guarantee.
 
 ## `0.14.0` — Runtime profiles and Rapid-first model management
 
-**Status: NOT STARTED.** No `0.14.0` gate is implemented. Nothing in `0.13.1`–`0.13.4` advances one.
+**Status: NOT STARTED.** No `0.14.0` gate is implemented. Nothing in `0.13.1`–`0.13.6` advances one.
 
 **Specification of record:** `~/.claude/plans/Plan — local-agents 0.14.0 Runtime Profiles and
 Rapid-First Model Management.md` (1,288 lines), tracked by waypoint `local-agents-0-14-0-runtime`.
@@ -56,7 +63,7 @@ retired in `0.13.1`.
 
 - [ ] **A — Reconcile the live base.** Inspect branch/HEAD/tags/manifest/remote/index/worktree,
       including ignored files. Report before mutating.
-      *Materially easier as of `0.13.4`: all four outstanding feature branches are merged to `main`,
+      *Materially easier as of `0.13.5`: all four outstanding feature branches are merged to `main`,
       so Phase A reads one consolidated base instead of five divergent branches.*
 - [ ] **B — Read-only resolver prototype.** Create only the three JSON files plus
       `bin/la-model-profile.py`. Seed one artifact (`qwen38-27b-4bit`) and two profiles
@@ -101,7 +108,7 @@ fail deterministically. **Only then** may the resolver become a dependency of an
 ### Release gates (§19) — all must hold
 
 ```text
-[ ] live 0.13.x base reconciled
+[ ] live 0.13.6 base reconciled
 [ ] artifact/profile/resource/environment schemas documented
 [ ] canonical resolver tests pass
 [ ] legacy private configuration remains usable
