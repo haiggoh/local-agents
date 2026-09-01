@@ -8,6 +8,22 @@ Where no Git tag exists, the release heading links directly to its release commi
 
 ## [Unreleased]
 
+## [0.13.4] — 2026-09-01
+
+### Added
+
+- `install/download-models-system-trust.sh` — optional wrapper that runs `install/download-models.sh`
+  against a Hugging Face client built to use the **native operating-system trust store** instead of
+  `certifi`. This is the corporate-TLS path: on a network with an inspecting proxy, a bundled CA set
+  fails while the system store succeeds. Overridable with `LA_HF_SYSTEM_TRUST_CLI`, defaulting to
+  `~/.local/hf-system-trust/bin/hf`.
+- It **fails closed** rather than silently falling back to the ordinary client: it verifies the
+  downloader and the client are both executable, that the client is actually named `hf`, and that
+  `command -v hf` resolves to exactly the intended absolute path after the `PATH` prepend. A wrapper
+  that quietly used the wrong client would produce a TLS failure that looks like a network fault.
+- Also exports `LA_HF_CLI` for forward compatibility with a future downloader that takes the client
+  directly rather than through `PATH`.
+
 ## [0.13.3] — 2026-09-01
 
 Per-launch Claude Code controls for full local sessions, and the model-facing session prompt
