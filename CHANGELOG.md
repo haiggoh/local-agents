@@ -12,6 +12,25 @@ Planned-but-unshipped work is tracked in **[`docs/ROADMAP.md`](docs/ROADMAP.md)*
 section stays empty between releases on purpose: an empty heading was previously mistaken for "there
 is no unshipped spec", when in fact the whole `0.14.0` specification existed outside the repository.
 
+## [0.13.6] — 2026-09-01
+
+### Fixed
+
+- **`skills/offload-to-local`: the two cloud-escape reasons were jointly exhaustive**, so a plan could
+  satisfy the rule while never offloading anything — compliant on paper, useless in practice. Measured
+  instance: four delegatable steps, four `cloud:` annotations, zero local dispatches, every call
+  individually defensible. The pattern is invisible per step and only appears in the aggregate.
+  Three repairs: a POSITIVE test for what qualifies (a self-contained transformation over many similar
+  inputs whose output is checkable against the source, with a measured worked example), "too hard to
+  delegate" reframed as a SPEC gap that splits into `cloud:spec` + `local:` slices rather than an
+  unfalsifiable verdict, and the requirement that a cloud reason be checkable and name its expiry —
+  with the DISTRIBUTION being what to watch, so a plan with zero local steps owes an explicit sentence
+  at plan level. Also: decide before READING the inputs, since opening the files to judge delegation
+  already spends the expensive part.
+- Deliberately versioned `0.13.6`, **not** `0.14.0` — that number belongs to the runtime-profiles
+  architecture, and `docs/ROADMAP.md` (added one version earlier) is what made that boundary explicit
+  enough to hold.
+
 ## [0.13.5] — 2026-09-01
 
 Release hygiene. No behaviour change to any backend or launcher.
