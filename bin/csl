@@ -32,12 +32,15 @@ EFFORTS=(low medium high xhigh max)     # claude --effort <level>
 # you ask most, and the engine log is the only place that answers it. CSL_WATCH=0 opts out.
 WATCH="${CSL_WATCH:-1}"
 
-# Session-capable models only — dispatch-only tiers (e.g. mlx_lm-served) have no /v1/messages, so
-# they cannot drive an interactive session at all.
+# Session-capable models only — dispatch-only tiers have no Anthropic /v1/messages surface, so
+# they cannot drive an interactive session at all. mlx_lm.server serves OpenAI-only under a path
+# id; llama.cpp's llama-server likewise. rapid and vllm both expose /v1/messages.
+# LA_SERVE holds the RESOLVED backend (la_finalize_serve ran inside la_load_config), so the
+# generic "mlx" / "" declarations never reach this test — they arrive here as rapid or vllm.
 SESSION_ALIASES=()
 for a in "${LA_ALIASES[@]}"; do
   case "${LA_SERVE[$a]:-}" in
-    vllm|vllm-mlx|rapid|"") SESSION_ALIASES+=("$a") ;;
+    rapid|vllm) SESSION_ALIASES+=("$a") ;;
     *) ;;
   esac
 done

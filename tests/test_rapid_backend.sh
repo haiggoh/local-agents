@@ -131,6 +131,12 @@ assert_grep "claude-opus-5"   "$ARGS" "served under the spoof id"
 assert_grep "--cache-memory-mb" "$ARGS" "cache ceiling flag present"
 assert_grep "2048"            "$ARGS" "cache ceiling value wired through"
 assert_grep "--hybrid-cache-entries" "$ARGS" "hybrid cache entries flag present"
+# Bounded continuous batching. This is what lets ONE server carry an interactive local session and
+# cloud dispatches at the same time — the thing vllm-mlx's single-slot SimpleEngine cannot do. Both
+# flags must be passed EXPLICITLY: rapid's own defaults are 256/256, which its own help calls too
+# high for a memory-constrained device, so inheriting them is not the same as choosing them.
+assert_grep "--max-num-seqs" "$ARGS" "concurrency: --max-num-seqs passed explicitly, not inherited"
+assert_grep "--max-concurrent-requests" "$ARGS" "concurrency: admission cap passed explicitly"
 assert_grep "--pin-system-prompt" "$ARGS" "pin-system-prompt on"
 assert_grep "--relocate-mid-conversation-system" "$ARGS" "relocate-mid-conversation-system on"
 assert_grep "--no-mllm"       "$ARGS" "mllm disabled"

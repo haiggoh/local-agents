@@ -8,6 +8,91 @@ Where no Git tag exists, the release heading links directly to its release commi
 
 ## [Unreleased]
 
+## [0.13.1] — 2026-08-31
+
+Rapid-MLX becomes the DEFAULT backend for MLX model launches. `0.13.0` made it *available*; this
+makes it what a registration gets when it does not ask for anything specific. llama.cpp remains the
+backend for GGUF artifacts, and vllm-mlx remains fully supported as an explicit pin.
+
+### Changed — DEFAULT BACKEND FLIP (read this before debugging a backend surprise)
+
+- The `serve` field gains a **generic** value, `mlx` (an empty field means the same), which resolves
+  to `LA_DEFAULT_MLX_BACKEND` — **now `rapid`**. Registrations that named `vllm` only because it was
+  the incumbent were migrated to `mlx`; nothing about the vllm code path changed.
+- **Rollback is one line:** `LA_DEFAULT_MLX_BACKEND=vllm` in `config.local.sh`. Every generic
+  registration reverts; every explicit pin is unaffected in either direction, which is what keeps
+  per-backend measurements attributable to the backend they were taken on.
+- **The concurrency caps became config knobs, at unchanged values.** `--max-num-seqs` and
+  `--max-concurrent-requests` were hardcoded `1`/`2` in `0.13.0`; they are now
+  `LA_RAPID_MAX_NUM_SEQS` / `LA_RAPID_MAX_CONCURRENT_REQUESTS` with **the same defaults**, so the
+  value is discoverable and testable without editing the script. **Behaviour is unchanged.** They
+  are 1/2 on purpose: Rapid does schedule continuously (its own default is 256), but the binding
+  constraint here is Metal memory — one long-context session measured 99.9 GB at 103,020 prompt
+  tokens against a 103.9 GB limit, with seven `SIGABRT`s in ~22h — so each extra in-flight sequence
+  multiplies the thing already saturating. Raising them is gated on the Metal-ceiling work, not on
+  preference.
+- `LA_RAPID_BIN` is now **discovered** when unset: brew → `PATH` → newest `~/.venvs/rapid-mlx-*`
+  (version-ordered, so `0.13.2` outranks `0.12.18` and `0.9.14`). Setting it explicitly still wins
+  and remains the recommended posture for a qualified version.
+- The four `qwen-3.x-rapid-*` qualification aliases are **retired** — the base aliases now *are*
+  Rapid, and keeping them would register a duplicate (subdir, backend, spoof) triple that makes
+  server-reuse matching ambiguous. `qwen-3.6-vllm-operator` / `-thinking` were added as explicit
+  legacy pins so the vllm lane stays reachable.
+- Kimi-VL registrations stay **pinned to `vllm`**: the viable-but-degraded MLLM verdict on record is
+  an audit of vllm-mlx's route specifically, and moving them would silently reassign that evidence
+  to a backend it was never taken on.
+
+### Added
+
+- `la_retired` / `la_retired_hint`: a retired alias now prints where it went instead of dead-ending
+  on "unknown alias", and retirements are listed in the aliases help — which is where the error
+  sends you.
+- `llama_cpp` is a recognised `serve` value. hotswap **refuses** it with instructions (exit 3)
+  rather than falling through to the vllm branch and dying at weight-load time on an artifact MLX
+  cannot read. It is deliberately **not** reachable from a generic value, so flipping the MLX
+  default can never reroute a GGUF model.
+- The loader warns when a GGUF-looking artifact resolves to an MLX backend, naming the alias and the
+  fix.
+- Config errors now fail the loader instead of being absorbed: an unknown `serve` value, and an
+  `LA_DEFAULT_MLX_BACKEND` that is not an MLX backend.
+- `la_serve_display`: every human-facing listing (aliases help, hotswap banner, session banner,
+  session log) shows the resolved backend **with** the declaration it came from — `rapid
+  (mlx->rapid)` for a generic value, bare `vllm` for a pin.
+- `tests/test_serve_default.sh` — 39 assertions over the resolution layer, backend vocabulary,
+  discovery order, the guards, and the two real scripts (`csl` filter, hotswap refusal). Every
+  hotswap invocation is bounded (`HOTSWAP_READY_TIMEOUT=4`) so a mutated resolver fails in seconds
+  instead of hanging the suite.
+- `tests/test_rapid_backend.sh` gains assertions that the concurrency caps are passed explicitly
+  rather than inherited (29 assertions, was 27).
+
+### Validated experimentally
+
+- `tests/test_serve_default.sh`: 39 pass, 0 fail. **Mutation-tested with 9 planted defects** (default
+  flipped, pins treated as generic, GGUF warning removed, declaration dropped from the display,
+  version sort downgraded to lexical, hotswap's llama_cpp gate removed, backend banner removed,
+  invalid values silently accepted, retired-alias hint disabled) — all 9 detected, baseline restored
+  clean.
+- `tests/test_rapid_backend.sh`: 29 pass, 0 fail. ShellCheck-clean at `-S error` across every edited
+  script.
+- Every flag hotswap passes was verified present in **both** rapid-mlx `0.12.18` (the pinned,
+  qualified version) and `0.13.2`, so the concurrency change is safe on the currently-serving build.
+
+### Known limitations
+
+- Rapid-MLX `0.13.2` is installed **side by side** at `~/.venvs/rapid-mlx-0.13.2` and passes
+  `pip check`, but `LA_RAPID_BIN` remains pinned to the qualified `0.12.18`. Promotion still needs a
+  serve-level smoke test; it was not run because a live local session held port 8000 and the RAM
+  headroom for a second 27B was thin. Retain `0.12.18` until `0.13.2` has 7 successful days.
+- Moving a model to Rapid does not qualify it there. Only the Qwen3.6/3.8 aliases have Rapid
+  runtime evidence; the rest resolve to Rapid as the sensible default but are unmeasured on it.
+- **A dispatch aimed at a model that a local session is already using WAITS for that turn.** With
+  `--max-num-seqs 1` one request runs and one queues; a third gets HTTP 503 + `Retry-After`. Rapid
+  could batch instead, but not within this machine's measured Metal ceiling. The supported answer is
+  a second server instance on another port — which hotswap does not currently offer, because it
+  deliberately REUSES a healthy matching server. That opt-out is unbuilt.
+- The RAM preflight's Rapid overhead formula (`6 GB + cache_mb/1024`) models a single sequence, so
+  it would understate load if the concurrency caps were ever raised.
+
 ## [0.13.0] — 2026-08-25
 
 ### Added

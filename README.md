@@ -37,11 +37,69 @@ want this as their default — reach for it when the cost saving is worth the la
 
 ## How it works
 
-Claude Code talks to an Anthropic-compatible endpoint. `vllm-mlx` exposes one (`/v1/messages`) and
-serves a local MLX model. For dispatch (way 1) you just `curl` that endpoint. For full local mode
-(way 2) the model is served under a spoofed Claude model id and `ANTHROPIC_BASE_URL` points Claude
-Code at it; direct routing keeps native transcripts + `history.jsonl` working (an earlier proxy
-approach suppressed them).
+Claude Code talks to an Anthropic-compatible endpoint. A local MLX backend exposes one
+(`/v1/messages`) and serves a local model. For dispatch (way 1) you just `curl` that endpoint. For
+full local mode (way 2) the model is served under a spoofed Claude model id and
+`ANTHROPIC_BASE_URL` points Claude Code at it; direct routing keeps native transcripts +
+`history.jsonl` working (an earlier proxy approach suppressed them).
+
+### Which backend serves a model
+
+A registration's `serve` field picks the engine. Prefer the **generic** value `mlx`, which resolves
+to this machine's default (`LA_DEFAULT_MLX_BACKEND`):
+
+| `serve` value | Engine | Notes |
+|---|---|---|
+| `mlx` (or empty) | **whatever `LA_DEFAULT_MLX_BACKEND` says — `rapid` by default** | Prefer this. One line moves the whole roster. |
+| `rapid` | Rapid-MLX | Pin. Anthropic `/v1/messages`, hybrid prefix cache, continuous batching. |
+| `vllm` | vllm-mlx | Pin. The **legacy** comparison lane. |
+| `mlx_lm` | `mlx_lm.server` | Dispatch-only — no `/v1/messages`, so no interactive session. |
+| `llama_cpp` | `llama-server` (llama.cpp) | **GGUF** artifacts. Not launched by hotswap; it stops with instructions. |
+
+**Rapid-MLX is the default** (since 0.13.1). It earns that on the hybrid prefix cache — 27,290 of
+27,584 prompt tokens cached, warm TTFT **2.0s vs 135.6s** cold on vllm-mlx — which is the
+difference between an interactive local session being usable and not. Two consequences worth
+knowing:
+
+- **Concurrency is a real capability, but it is deliberately switched off here.** Rapid has a
+  genuine continuous-batching scheduler (`--max-num-seqs`, its own default 256), unlike vllm-mlx's
+  single-slot engine. This stack still runs it at **1** (`LA_RAPID_MAX_NUM_SEQS`), because the
+  binding constraint is Metal memory, not the scheduler: one long-context session already measured
+  99.9 GB at 103,020 prompt tokens against a 103.9 GB limit, with seven `SIGABRT`s in ~22h. Each
+  extra in-flight sequence carries its own KV working set, so raising this multiplies what is
+  already saturating. Effect today: a dispatch to a busy session's server **queues** behind the
+  turn (one running, one queued, a third gets 503). Running a session and a dispatch on the same
+  model at the same time is better served by a **second instance on another port** — 27B 4-bit
+  weights are ~16 GB, so two instances fit where two long contexts do not.
+- **GGUF is unaffected.** `llama_cpp` is a per-model pin and is deliberately *not* reachable from a
+  generic value, so flipping the MLX default can never reroute a GGUF model onto an engine that
+  cannot load it. The loader warns if a GGUF-looking artifact resolves to an MLX backend.
+
+Rolling back is one line — `LA_DEFAULT_MLX_BACKEND=vllm` in `config.local.sh`. Explicit pins are
+unaffected in either direction, which is what keeps per-backend measurements attributable. Every
+listing prints the resolved backend *with* its declaration (`rapid (mlx->rapid)`), so no report
+claims the config said something it did not.
+
+#### Why Rapid-MLX lives in a pinned venv, not Homebrew
+
+Homebrew *does* package it (`brew install rapid-mlx`), and the formula is closer to the pinned venv
+than it looks: it is `Language::Python::Virtualenv` with 55 pinned resources, matching this stack's
+qualified versions exactly (mlx-lm 0.31.3, transformers 5.12.1, tokenizers 0.22.2, …). So the
+choice is not "venv vs no venv" — it is *who pins the venv*. Three reasons it stays here:
+
+1. **`mlx` is a `depends_on`, not a pinned resource.** The brew build runs against whatever the
+   `mlx` formula is at, and it moves on every `brew upgrade`. `mlx` is the Metal layer that this
+   stack's memory-ceiling measurements are measurements *of*.
+2. **No extras path.** `pip install 'rapid-mlx[vision]'` has no brew equivalent, so a separately
+   locked vision environment is only buildable as a venv.
+3. **Retention isn't yours.** Brew links one version and `brew cleanup` decides when the old one
+   goes, so "retain the previous working runtime for 7 successful days" is not enforceable.
+
+`LA_RAPID_BIN` is therefore normally **pinned** to a qualified version, and upgrades are built
+**side by side** (`~/.venvs/rapid-mlx-<new>`) and promoted after qualification. Left unset, it
+auto-discovers brew → `PATH` → newest `~/.venvs/rapid-mlx-*`, so a machine that prefers the brew
+install still works. The weekly `local-stack-update-check` launchd job watches PyPI for new Rapid
+releases and only *notifies* — it never installs.
 
 ## What's in the box
 

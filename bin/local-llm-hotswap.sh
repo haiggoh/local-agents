@@ -26,11 +26,19 @@ mkdir -p "$CONFIG_DIR" "$(dirname "$LOG_FILE_BASE")"
 export VLLM_MLX_SIMPLE_ENGINE_LOCK_ADMISSION="$LA_ADMISSION"
 
 if [ -z "$MODEL_NAME" ] || ! la_lookup "$MODEL_NAME"; then
+    la_retired_hint "$MODEL_NAME" || true
     echo "Usage: $0 <alias>"; echo "Registered aliases:"; la_aliases_help; exit 1
 fi
 MODEL_DIR="$LA_CUR_DIR"; SPOOF_NAME="$LA_CUR_SPOOF"; SERVE="$LA_CUR_SERVE"
 TOOLP="$LA_CUR_TOOLP"; REASONP="$LA_CUR_REASONP"; THINK="$LA_CUR_THINK"
 SPOOF_PRIMARY="${SPOOF_NAME%%,*}"
+# State the backend BEFORE anything loads, and say where it came from. A generic `serve=mlx`
+# registration is resolved by config-lib to whatever LA_DEFAULT_MLX_BACKEND is, so without this
+# line the only visible record of which engine actually ran would be the log filename.
+echo "🔧 backend: $(la_serve_display "$MODEL_NAME")   (machine default: $LA_DEFAULT_MLX_BACKEND)"
+if [ "$SERVE" = "vllm" ]; then
+    echo "   ℹ️  vllm-mlx is the LEGACY lane — kept for A/B against recorded evidence. The default is rapid."
+fi
 if [ ! -d "$MODEL_DIR" ]; then echo "❌ model dir not found: $MODEL_DIR (check LA_MODELS_DIR / subdir in config)"; exit 1; fi
 # A directory is not a model. A metadata-only shell (configs + tokenizer, no weights) is left by an
 # aborted download; without this check the server starts and dies at load time with a far less
@@ -137,8 +145,11 @@ LOG_FILE="${LOG_FILE_BASE}_${TARGET_PORT}.log"
 # --- Rapid-MLX branch ---------------------------------------------------------
 if [ "$SERVE" = "rapid" ]; then
     if [ ! -x "$LA_RAPID_BIN" ]; then
-        echo "❌ Rapid-MLX executable not found or not executable: $LA_RAPID_BIN" >&2
-        echo "   Set LA_RAPID_BIN in config.local.sh to the pinned isolated executable." >&2
+        echo "❌ Rapid-MLX executable not found or not executable: ${LA_RAPID_BIN:-<none discovered>}" >&2
+        echo "   Rapid is the DEFAULT backend, so this stops every generic registration. Fix by either:" >&2
+        echo "     brew install rapid-mlx                    (maintained install, discovered automatically)" >&2
+        echo "     LA_RAPID_BIN=<path> in config.local.sh     (pin an exact version, e.g. an isolated venv)" >&2
+        echo "   Or set LA_DEFAULT_MLX_BACKEND=vllm in config.local.sh to fall back to the legacy lane." >&2
         exit 1
     fi
 
@@ -151,8 +162,11 @@ if [ "$SERVE" = "rapid" ]; then
         --served-model-name "$SPOOF_PRIMARY"
         --host 127.0.0.1
         --port "$TARGET_PORT"
-        --max-num-seqs 1
-        --max-concurrent-requests 2
+        # Concurrency. These were HARDCODED 1/2 in 0.13.0; they are now config knobs with the SAME
+        # defaults, so the value is discoverable and adjustable without editing this script — not
+        # so that it should casually be raised. See config-lib for why 1 is the right default here.
+        --max-num-seqs "$LA_RAPID_MAX_NUM_SEQS"
+        --max-concurrent-requests "$LA_RAPID_MAX_CONCURRENT_REQUESTS"
         --cache-memory-mb "$LA_RAPID_CACHE_MEMORY_MB"
         --hybrid-cache-entries "$LA_RAPID_HYBRID_CACHE_ENTRIES"
         --timeout "$LA_SERVER_TIMEOUT_S"
@@ -214,7 +228,20 @@ if [ "$SERVE" = "mlx_lm" ]; then
     echo "SUCCESS_PORT=$TARGET_PORT"; exit 0
 fi
 
-# --- vllm-mlx branch ---------------------------------------------------------
+# --- llama.cpp / GGUF: recognised vocabulary, deliberately NOT launched from here -------------
+# GGUF models are served by llama-server (llama.cpp), which this script does not manage — the
+# Devstral judge on :8080 is started by hand. The branch exists so a serve=llama_cpp registration
+# STOPS here with an explanation instead of falling through into the vllm branch below and dying
+# at weight-load time on an artifact MLX cannot read.
+if [ "$SERVE" = "llama_cpp" ]; then
+    echo "❌ $MODEL_NAME is registered serve=llama_cpp (GGUF). This script launches MLX backends only."
+    echo "   Start it with llama-server yourself, e.g.:"
+    echo "     llama-server -m $MODEL_DIR/<model>.gguf --port 8080 -c 32768"
+    echo "   llama.cpp remains the backend for GGUF artifacts; rapid/vllm are for MLX artifacts."
+    exit 3
+fi
+
+# --- vllm-mlx branch (LEGACY lane — rapid is the default; see config-lib's backend vocabulary) --
 TMP_CONFIG="$CONFIG_DIR/vllm_config_${TARGET_PORT}.yaml"
 # spoof_id may be a COMMA-SEPARATED preference list, newest Claude model first
 # (e.g. "claude-opus-5,claude-opus-4-8"). We serve the SAME weights under EVERY id plus the

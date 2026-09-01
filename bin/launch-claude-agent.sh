@@ -33,6 +33,7 @@ if [ -z "$MODEL_ALIAS" ] && [ -z "${LA_MENU_REDIRECT:-}" ] && [ -x "$LAUNCH_DIR/
     exec "$LAUNCH_DIR/csl"
 fi
 if [ -z "$MODEL_ALIAS" ] || ! la_lookup "$MODEL_ALIAS"; then
+    la_retired_hint "$MODEL_ALIAS" || true
     echo "Usage: $0 <alias> [effort-override]"; echo "Registered aliases:"; la_aliases_help
     # Signpost the menu front-end for the bad-alias path (the no-arg path goes there automatically).
     echo; echo "Tip: run '$LAUNCH_DIR/csl' with no arguments to pick from a numbered menu instead."
@@ -47,7 +48,13 @@ EFFORT_FLAG="--effort $EFFORT"
 # banner read an unset THINK variable and therefore displayed "off" even
 # when LA_CUR_THINK=true and the server reasoning parser was enabled.
 THINK="$LA_CUR_THINK"
+# Resolved backend (rapid | vllm | mlx_lm), plus the declaration it came from. The BANNER shows the
+# combined "rapid (mlx->rapid)" form because it is for humans; the session LOG keeps them as two
+# separate single-token fields, because it is space-separated key=value and local-watch.sh greps it
+# — a value containing a space would corrupt the field it sits in.
 BACKEND="$LA_CUR_SERVE"
+BACKEND_DECLARED="${LA_SERVE_DECLARED[$MODEL_ALIAS]:-}"
+BACKEND_DISPLAY="$(la_serve_display "$MODEL_ALIAS")"
 
 # RAM PREFLIGHT — before any weights load. Booting a model while other servers hold RAM has
 # frozen this machine hard (Terminal AND the force-quit menu became unresponsive), and there is no
@@ -95,9 +102,10 @@ if [ "$LA_CUR_SERVE" = "mlx_lm" ]; then
     echo "    model=\"$LA_CUR_DIR\" via curl / bin/librarian-dispatch.py."; exit 0
 fi
 
-# --- DIRECT routing (no proxy/relay): vllm-mlx serves the Anthropic endpoint under the spoof id.
+# --- DIRECT routing (no proxy/relay): the backend (rapid-mlx or vllm-mlx) serves the Anthropic
+# /v1/messages endpoint itself, under the spoof id. Both expose it; mlx_lm.server does not.
 export ANTHROPIC_BASE_URL="http://localhost:${VLLM_PORT}"    # NO /v1 — Claude Code appends /v1/messages
-export ANTHROPIC_AUTH_TOKEN="local"                           # vllm ignores auth; avoids the API-key prompt
+export ANTHROPIC_AUTH_TOKEN="local"                           # backend ignores auth; avoids the API-key prompt
 export CLAUDE_IS_LOCAL="true"                                 # generic signal that this session is local
 export CLAUDE_CODE_MAX_OUTPUT_TOKENS="$LA_MAX_OUTPUT_TOKENS"   # bound worst-case turn time + stay under max_model_len
 # Timeouts: Claude Code's defaults assume a fast cloud endpoint. A local 27B doing a big prefill over
@@ -130,7 +138,7 @@ cat <<BANNER
 ║  🖥️  LOCAL SESSION — inference runs on THIS MACHINE, \$0 per token         ║
 ╚══════════════════════════════════════════════════════════════════════════╝
    🤖 model    : ${MODEL_ALIAS}   (presenting as ${MODEL_SPOOF})
-   ⚙️  backend  : ${BACKEND}
+   ⚙️  backend  : ${BACKEND_DISPLAY}
    🎚️  effort   : ${EFFORT}
    🧠 thinking : ${_think_label}
    🔌 port     : ${VLLM_PORT}   →  ${ANTHROPIC_BASE_URL}
@@ -191,7 +199,7 @@ AGENT_PROMPT="You are an autonomous AI agent operating directly in a CLI. Do not
 
 # Log which model drives this session (the spoof id is shared across tiers, so the alias lives here).
 mkdir -p "$HOME/.claude/logs"
-echo "$(date '+%Y-%m-%d %H:%M:%S')  alias=$MODEL_ALIAS  spoof=$MODEL_SPOOF effort=$EFFORT  backend=$BACKEND  vllm_port=$VLLM_PORT  mode=direct" >> "$HOME/.claude/logs/local-agents-sessions.log"
+echo "$(date '+%Y-%m-%d %H:%M:%S')  alias=$MODEL_ALIAS  spoof=$MODEL_SPOOF effort=$EFFORT  backend=$BACKEND  declared=$BACKEND_DECLARED  vllm_port=$VLLM_PORT  mode=direct" >> "$HOME/.claude/logs/local-agents-sessions.log"
 echo "🧭 Session engine: $MODEL_ALIAS  (direct; logged to ~/.claude/logs/local-agents-sessions.log)"
 
 # Record WHICH transcript this session writes, so watchers never have to guess it.
