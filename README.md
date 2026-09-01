@@ -187,6 +187,41 @@ work stays on the cloud model.
 
 ## Downloading models
 
+### Recommended full local-session model: Ornith 1.5 35B-A3B
+
+The current recommendation for a **full local Claude Code session** is the
+non-thinking `ornith-1.5-35b` alias, backed by:
+
+- Hugging Face repository:
+  `ornith-ai/Ornith-1.5-35B-A3B-MLX-4bit`
+- pinned revision:
+  `19504d912fa8fc7622bf6b1de3db5d5d890b1f02`
+- approximate download size: 19.5 GB
+- backend: Rapid-MLX
+- mode: non-thinking
+
+Download the pinned artifact through the normal downloader:
+
+    ./install/download-models.sh --select ornith-1.5-35b
+
+On a machine that needs the native operating-system TLS trust store, use:
+
+    ./install/download-models-system-trust.sh --select ornith-1.5-35b
+
+Then launch it directly or select it from `csl`:
+
+    ./bin/launch-claude-agent.sh ornith-1.5-35b
+    ./bin/csl
+
+This recommendation is based on successful use in a real Claude Code session.
+In that early operational use, non-thinking Ornith was noticeably faster than
+Qwen 3.8 and was the best-performing full-session model tried so far. This is
+not yet a controlled benchmark or complete qualification result.
+
+Only the **non-thinking** Ornith mode has been tested successfully. The
+thinking variant remains untested and is therefore not registered or
+recommended in the public example configuration yet.
+
 Two artifacts, and only one of them is code:
 
 ```text
@@ -328,6 +363,11 @@ output blind) → correct/re-dispatch. The `offload-to-local` skill documents th
 the change afterwards is ordinary shipping discipline, so this plugin deliberately doesn't specify it.)
 
 **Way 2 — full local session** (a local model as the session engine):
+
+The current tested recommendation is `ornith-1.5-35b` in non-thinking mode.
+It has completed a real Claude Code session successfully and, in early use,
+was noticeably faster than Qwen 3.8. Ornith thinking remains untested.
+
 ```bash
 ./bin/launch-claude-agent.sh my-operator                  # interactive local session
 ./bin/launch-claude-agent.sh deepseek-r1-architect max    # optional effort override
@@ -356,7 +396,7 @@ Example lean local session:
 LA_CLAUDE_SETTINGS="$HOME/.claude/launch-profiles/lean-local-general.json" \
 LA_CLAUDE_TOOLS="Bash,Read,Grep,Glob,Edit,Write,Skill,AskUserQuestion" \
 LA_AUTO_COMPACT_WINDOW="100k" \
-  ./bin/launch-claude-agent.sh qwen-3.8-rapid-operator high
+  ./bin/launch-claude-agent.sh ornith-1.5-35b high
 ```
 
 The settings file in that example is user-managed and is not shipped by this repository. It can

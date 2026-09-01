@@ -112,10 +112,23 @@ LA_COUNCIL_NOTE=""
 # NOTE: the `roles` field (arg 9) is left "" here — roles are defined ONCE below via `la_role`
 # (the single source that drives both the resolver and the csl menu). The `roles` tag still works as
 # a legacy shortcut (auto-promoted to bindings if you declare no la_role lines), but don't set both.
+# Current full-session recommendation: non-thinking Ornith. This exact
+# artifact completed a real Claude Code session successfully and was
+# noticeably faster than Qwen 3.8 in early operational use. This is not a
+# controlled benchmark. Ornith thinking remains untested and is intentionally
+# absent from this public example.
+la_register ornith-1.5-35b         Ornith-1.5-35B-A3B-MLX-4bit        rapid  hermes ""          false claude-opus-4-8           high  ""  ornith-ai/Ornith-1.5-35B-A3B-MLX-4bit              19.5
 la_register qwen-3.6-operator      Qwen3.6-27B-UD-MLX-4bit            mlx    qwen  ""          false claude-opus-4-8           high  ""  unsloth/Qwen3.6-27B-UD-MLX-4bit                   16
 la_register qwen-3.6-thinking      Qwen3.6-27B-UD-MLX-4bit            mlx    qwen  qwen3       true  claude-opus-4-8           high  ""  unsloth/Qwen3.6-27B-UD-MLX-4bit                   16
 la_register deepseek-r1-architect  DeepSeek-R1-Distill-Qwen-32B-4bit  mlx    qwen  deepseek_r1 true  claude-opus-4-8           max   ""  mlx-community/DeepSeek-R1-Distill-Qwen-32B-4bit    18
 la_register llama-scout            Llama-4-Scout-17B-16E-Instruct-4bit mlx_lm llama ""         false claude-haiku-4-5-20251001 low   ""  mlx-community/Llama-4-Scout-17B-16E-Instruct-4bit 60
+
+
+# Pinned acquisition revision for the recommended Ornith artifact.
+# config-lib loads this file inside la_load_config; -g keeps the optional
+# revision map visible to download-models.sh after that function returns.
+declare -gA LA_REV
+LA_REV["ornith-1.5-35b"]=19504d912fa8fc7622bf6b1de3db5d5d890b1f02
 
 # --- role bindings (SINGLE SOURCE OF TRUTH for roles; drives la-roles.sh AND the csl menu) -----
 # la_role <role> <alias> <effort> [mode:dispatch|session|both]. The SAME weights fill different roles

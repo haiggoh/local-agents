@@ -12,6 +12,39 @@ Planned-but-unshipped work is tracked in **[`docs/ROADMAP.md`](docs/ROADMAP.md)*
 section stays empty between releases on purpose: an empty heading was previously mistaken for "there
 is no unshipped spec", when in fact the whole `0.14.0` specification existed outside the repository.
 
+## [0.13.7] — 2026-09-01
+
+### Changed
+
+- **`csl` now lists every on-disk, session-capable model in its primary
+  numbered menu**, rather than hiding the full roster behind free composition.
+- Model rows show resolved backend, thinking mode, configured effort, and role
+  metadata. Numbered selections use the configured effort; `c` remains the
+  custom-effort path.
+- The watcher now defaults off. It can still be toggled with `w`, or enabled
+  initially with `CSL_WATCH=1`.
+- Added an isolated deterministic menu test covering availability filtering,
+  default-effort launching, custom effort, and watcher opt-in.
+- Added the pinned non-thinking `ornith-1.5-35b` registration to the public
+  example configuration and documented its download and launch workflow.
+- Non-thinking Ornith is now the recommended full local-session model based on
+  successful real Claude Code use and the best interactive performance observed
+  so far, including noticeably better responsiveness than Qwen 3.8.
+- This is explicitly early operational evidence, not a controlled benchmark.
+  Ornith thinking remains untested and is not publicly registered or
+  recommended.
+
+### Validated
+
+- CSL menu tests: **16 passed**.
+- Backend resolution and launch-safety tests: **39 passed**.
+- Rapid backend tests: **29 passed**.
+- ShellCheck passed.
+- The public example resolves Ornith to Rapid-MLX, thinking off, the expected
+  Hugging Face repository, and the exact pinned revision.
+- A live private-roster check confirmed the newly acquired qualification
+  aliases remain directly visible and the watcher defaults off.
+
 ## [0.13.6] — 2026-09-01
 
 ### Fixed
