@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # csl — "claude session local": front-end for launch-claude-agent.sh.
 #
-#   csl              -> interactive picker (recommendations, free model×effort, watcher toggle)
+#   csl              -> interactive picker (all available models, effort override, watcher toggle)
 #   csl roles        -> disk-aware role resolver (which on-disk model fills each role)
 #   csl <args...>    -> passed straight through to the launcher, unchanged (no picker, no watcher)
 #
@@ -10,7 +10,8 @@
 # fixed role archetypes are the point — you route a task to the model whose strengths suit it, and
 # that matters most when several agents run at once. For a session there is exactly ONE engine, and
 # the model×effort pairing is the main lever you have over speed vs quality for everything you do
-# in that session. So the roles stay as recommendations, and any combination is reachable.
+# in that session. The primary menu therefore shows every available session model at its configured
+# default effort; custom effort composition remains available explicitly.
 #
 # Duplicates NO config: models, roles and presets all come from the config overlay.
 set -uo pipefail
@@ -28,9 +29,9 @@ if [ "$#" -gt 0 ]; then exec "$LAUNCHER" "$@"; fi
 la_load_config || exit 1
 
 EFFORTS=(low medium high xhigh max)     # claude --effort <level>
-# Watcher defaults ON: a local session is slow enough that "is it alive or stuck?" is the question
-# you ask most, and the engine log is the only place that answers it. CSL_WATCH=0 opts out.
-WATCH="${CSL_WATCH:-1}"
+# Watcher defaults OFF: ordinary selection should open only the requested local session.
+# Toggle it with `w`, or set CSL_WATCH=1 to opt in by default.
+WATCH="${CSL_WATCH:-0}"
 
 # Session-capable models only — dispatch-only tiers have no Anthropic /v1/messages surface, so
 # they cannot drive an interactive session at all. mlx_lm.server serves OpenAI-only under a path
@@ -40,34 +41,26 @@ WATCH="${CSL_WATCH:-1}"
 SESSION_ALIASES=()
 for a in "${LA_ALIASES[@]}"; do
   case "${LA_SERVE[$a]:-}" in
-    rapid|vllm) SESSION_ALIASES+=("$a") ;;
+    rapid|vllm)
+      la_on_disk "$a" && SESSION_ALIASES+=("$a")
+      ;;
     *) ;;
   esac
 done
-[ "${#SESSION_ALIASES[@]}" -eq 0 ] && SESSION_ALIASES=("${LA_ALIASES[@]}")
 
-# Recommendations come from la_role bindings (shared source of truth with la-roles.sh, so the menu
-# and the resolver cannot drift). Session-capable bindings only.
-REC_LABEL=(); REC_ALIAS=(); REC_EFFORT=()
-_seen_roles=""
-for b in "${LA_ROLE_BINDINGS[@]:-}"; do
-  [ -n "$b" ] || continue
-  IFS='|' read -r role alias effort mode <<< "$b"
-  case "${mode:-both}" in session|both) ;; *) continue;; esac
-  # ONE row per role. The config binds several efforts (and sometimes several models) to the same
-  # role for dispatch A/B purposes; as a session menu that just reprints "operator" three times.
-  # Keep the first binding per role as the recommendation and let "compose freely" cover the rest.
-  case " $_seen_roles " in *" $role "*) continue;; esac
-  _seen_roles="$_seen_roles $role"
-  REC_LABEL+=("$(printf '%-10s %-24s effort=%s' "$role" "$alias" "${effort:-default}")")
-  REC_ALIAS+=("$alias"); REC_EFFORT+=("$effort")
-done
-if [ "${#REC_ALIAS[@]}" -eq 0 ] && [ "${#LA_PRESET_LABEL[@]:-0}" -gt 0 ]; then
-  for ((i=0; i<${#LA_PRESET_LABEL[@]}; i++)); do
-    REC_LABEL+=("$(printf '%-10s %-24s effort=%s' "preset" "${LA_PRESET_ALIAS[$i]}" "${LA_PRESET_EFFORT[$i]}")")
-    REC_ALIAS+=("${LA_PRESET_ALIAS[$i]}"); REC_EFFORT+=("${LA_PRESET_EFFORT[$i]}")
-  done
+if [ "${#SESSION_ALIASES[@]}" -eq 0 ]; then
+  echo "No on-disk models with an Anthropic-compatible session backend are available." >&2
+  exit 1
 fi
+
+MODEL_LABELS=()
+for a in "${SESSION_ALIASES[@]}"; do
+  roles="$(la_roles_for_alias "$a")"
+  [ -n "$roles" ] || roles="untagged"
+  MODEL_LABELS+=("$(
+    printf '%-30s backend=%-20s thinking=%-5s effort=%-6s roles=%s'       "$a"       "$(la_serve_display "$a")"       "${LA_THINK[$a]:-?}"       "${LA_EFFORT[$a]:-?}"       "$roles"
+  )")
+done
 
 _pick_from() {   # $1=prompt  $2=default index (1-based)  rest=items -> echoes chosen 1-based index
   # The list and the prompt go to STDERR on purpose: this function is called inside $(...), which
@@ -105,13 +98,13 @@ OSA
 while :; do
   echo
   echo "Local agents — launch a local session (config: ${LA_CONFIG_SOURCE})"
-  if [ "${#REC_ALIAS[@]}" -gt 0 ]; then
-    echo
-    echo "Recommended pairings (from your role bindings):"
-    for ((i=0; i<${#REC_LABEL[@]}; i++)); do printf "  %d) %s\n" "$((i+1))" "${REC_LABEL[$i]}"; done
-  fi
   echo
-  echo "  c) compose freely — any model × any effort (speed vs quality is yours to set)"
+  echo "Available models (on disk, session-capable; numbered rows use the configured effort):"
+  for ((i=0; i<${#MODEL_LABELS[@]}; i++)); do
+    printf "  %d) %s\n" "$((i+1))" "${MODEL_LABELS[$i]}"
+  done
+  echo
+  echo "  c) choose a listed model × custom effort"
   if [ "$WATCH" = "1" ]; then echo "  w) watcher: ON  — opens a window following this session (toggle)"
   else                        echo "  w) watcher: OFF — no monitor window (toggle)"; fi
   echo "  q) quit"
@@ -122,12 +115,8 @@ while :; do
     w|W) if [ "$WATCH" = "1" ]; then WATCH=0; else WATCH=1; fi; continue ;;
     c|C)
       echo >&2
-      echo "Models (session-capable):" >&2
-      labels=()
-      for a in "${SESSION_ALIASES[@]}"; do
-        labels+=("$(printf '%-24s thinking=%-5s default-effort=%s' "$a" "${LA_THINK[$a]:-?}" "${LA_EFFORT[$a]:-?}")")
-      done
-      mi=$(_pick_from "Model" 1 "${labels[@]}")
+      echo "Models (on disk, session-capable):" >&2
+      mi=$(_pick_from "Model" 1 "${MODEL_LABELS[@]}")
       [ "$mi" = "0" ] && { echo "Invalid selection."; continue; }
       chosen="${SESSION_ALIASES[$((mi-1))]}"
       echo >&2
@@ -137,10 +126,11 @@ while :; do
       _launch "$chosen" "${EFFORTS[$((ei-1))]}"
       ;;
     *)
-      if ! [[ "$sel" =~ ^[0-9]+$ ]] || [ "$sel" -lt 1 ] || [ "$sel" -gt "${#REC_ALIAS[@]}" ]; then
+      if ! [[ "$sel" =~ ^[0-9]+$ ]] || [ "$sel" -lt 1 ] || [ "$sel" -gt "${#SESSION_ALIASES[@]}" ]; then
         echo "Invalid selection."; continue
       fi
-      _launch "${REC_ALIAS[$((sel-1))]}" "${REC_EFFORT[$((sel-1))]}"
+      chosen="${SESSION_ALIASES[$((sel-1))]}"
+      _launch "$chosen" "${LA_EFFORT[$chosen]:-}"
       ;;
   esac
 done

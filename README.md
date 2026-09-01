@@ -397,9 +397,10 @@ model; classifier routing remains a separate qualification and safety problem.
 
 ### The picker: why a session is chosen differently from a dispatch
 
-`csl` gives you role-based **recommendations** and then lets you compose **any model with any effort
-level** (`low`, `medium`, `high`, `xhigh`, `max`). That is deliberate, because the two ways of using
-this plugin are different decisions:
+`csl` lists every on-disk model whose backend can drive an interactive Claude session. Selecting
+a numbered model uses its configured default effort. The `c` option still lets you combine any listed
+model with an explicit effort (`low`, `medium`, `high`, `xhigh`, `max`). This differs from dispatch
+routing because the two ways of using this plugin are different decisions:
 
 - **Dispatching local models as subagents** — the fixed roles and archetypes are the point. You route
   a task to the model whose strengths suit it, and that matters most when several agents run at once.
@@ -408,12 +409,12 @@ this plugin are different decisions:
   model × effort pairing is your main lever over speed versus depth for everything you do in that
   session. A fixed list of preset pairings hides that lever; free composition exposes it.
 
-So the roles stay, as a shortcut for the common case, and every combination is still reachable.
+Role bindings remain visible as metadata and continue to drive dispatch routing, but they no
+longer hide unbound session models from the primary picker. Every available session model is directly
+selectable, while custom effort composition remains reachable through `c`.
 
-The picker also offers to open a **watcher window** alongside the new session, on by default. A local
-turn takes long enough that "is it working or stuck?" becomes the question you ask most, and the
-engine log is the only place that answers it — so it should not require remembering a second command.
-Toggle it with `w` in the picker, or set `CSL_WATCH=0` to default it off.
+The watcher is **off by default**, so an ordinary selection opens only the requested session. Toggle
+it with `w` in the picker, or set `CSL_WATCH=1` to opt in by default.
 
 ### What to expect from a local session
 
