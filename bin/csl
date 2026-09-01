@@ -58,7 +58,12 @@ for a in "${SESSION_ALIASES[@]}"; do
   roles="$(la_roles_for_alias "$a")"
   [ -n "$roles" ] || roles="untagged"
   MODEL_LABELS+=("$(
-    printf '%-30s backend=%-20s thinking=%-5s effort=%-6s roles=%s'       "$a"       "$(la_serve_display "$a")"       "${LA_THINK[$a]:-?}"       "${LA_EFFORT[$a]:-?}"       "$roles"
+    printf '%-30s backend=%-20s thinking=%-5s effort=%-6s roles=%s' \
+      "$a" \
+      "$(la_serve_display "$a")" \
+      "${LA_THINK[$a]:-?}" \
+      "${LA_EFFORT[$a]:-?}" \
+      "$roles"
   )")
 done
 

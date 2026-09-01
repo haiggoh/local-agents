@@ -38,7 +38,13 @@ assert_no_grep() {
 SB="$(mktemp -d "${TMPDIR:-/tmp}/la-csl-menu-test.XXXXXX")"
 trap 'rm -rf "$SB"' EXIT INT TERM HUP
 
-mkdir -p   "$SB/bin"   "$SB/config"   "$SB/home/.models/ModelAlpha"   "$SB/home/.models/ModelBeta"   "$SB/home/.models/ModelAbsent"   "$SB/home/.models/DispatchOnly"
+mkdir -p \
+  "$SB/bin" \
+  "$SB/config" \
+  "$SB/home/.models/ModelAlpha" \
+  "$SB/home/.models/ModelBeta" \
+  "$SB/home/.models/ModelAbsent" \
+  "$SB/home/.models/DispatchOnly"
 
 cp "$REPO/bin/csl" "$SB/bin/csl"
 cp "$REPO/config/config-lib.sh" "$SB/config/config-lib.sh"
@@ -71,12 +77,16 @@ run_csl() {
   local result_file="$2"
 
   printf '%b' "$input" |
-    HOME="$SB/home"     CSL_LAUNCHER="$SB/bin/stub-launcher"     CSL_TEST_RESULT="$result_file"     bash "$SB/bin/csl" 2>&1
+    HOME="$SB/home" \
+    CSL_LAUNCHER="$SB/bin/stub-launcher" \
+    CSL_TEST_RESULT="$result_file" \
+      bash "$SB/bin/csl" 2>&1
 }
 
 echo "== 1. primary menu lists every available session model =="
 out="$(run_csl 'q\n' "$SB/no-launch")"
-assert_grep 'Available models (on disk, session-capable' "$out"   'primary menu describes its availability filter'
+assert_grep 'Available models (on disk, session-capable' "$out" \
+  'primary menu describes its availability filter'
 assert_grep '1) alpha' "$out" 'first on-disk Rapid model is directly listed'
 assert_grep '2) beta' "$out" 'second on-disk vllm model is directly listed'
 assert_grep 'backend=rapid' "$out" 'menu displays resolved backend'
@@ -85,25 +95,33 @@ assert_grep 'effort=medium' "$out" 'menu displays configured effort'
 assert_grep 'roles=operator' "$out" 'menu displays role metadata'
 assert_no_grep 'absent ' "$out" 'absent model is omitted'
 assert_no_grep 'dispatch-only' "$out" 'non-session backend is omitted'
-assert_no_grep 'Recommended pairings' "$out"   'role recommendations no longer replace the model list'
+assert_no_grep 'Recommended pairings' "$out" \
+  'role recommendations no longer replace the model list'
 assert_grep 'watcher: OFF' "$out" 'watcher defaults off'
 assert_no_grep 'watcher: ON' "$out" 'watcher is not enabled implicitly'
-assert_grep 'c) choose a listed model × custom effort' "$out"   'custom effort composition remains available'
+assert_grep 'c) choose a listed model × custom effort' "$out" \
+  'custom effort composition remains available'
 
 echo "== 2. numbered choice uses the model default effort =="
 rm -f "$SB/default-result"
 run_csl '2\n' "$SB/default-result" >/dev/null
-assert_grep 'beta|medium' "$(cat "$SB/default-result" 2>/dev/null)"   'numbered beta selection launches with configured medium effort'
+assert_grep 'beta|medium' "$(cat "$SB/default-result" 2>/dev/null)" \
+  'numbered beta selection launches with configured medium effort'
 
 echo "== 3. custom composition overrides effort explicitly =="
 rm -f "$SB/custom-result"
 run_csl 'c\n1\n5\n' "$SB/custom-result" >/dev/null
-assert_grep 'alpha|max' "$(cat "$SB/custom-result" 2>/dev/null)"   'custom composition launches alpha at max effort'
+assert_grep 'alpha|max' "$(cat "$SB/custom-result" 2>/dev/null)" \
+  'custom composition launches alpha at max effort'
 
 echo "== 4. watcher remains an explicit opt-in =="
 out="$(
   printf 'q\n' |
-    HOME="$SB/home"     CSL_WATCH=1     CSL_LAUNCHER="$SB/bin/stub-launcher"     CSL_TEST_RESULT="$SB/watch-result"     bash "$SB/bin/csl" 2>&1
+    HOME="$SB/home" \
+    CSL_WATCH=1 \
+    CSL_LAUNCHER="$SB/bin/stub-launcher" \
+    CSL_TEST_RESULT="$SB/watch-result" \
+      bash "$SB/bin/csl" 2>&1
 )"
 assert_grep 'watcher: ON' "$out" 'CSL_WATCH=1 opts in by default'
 
