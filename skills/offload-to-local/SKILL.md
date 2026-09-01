@@ -15,6 +15,17 @@ The habit is not "notice you're already grinding through files and stop." It's: 
 break a task into steps, decide per step where it runs before you execute anything.** Waiting until
 you're mid-bulk-work means the cloud tokens are already being spent.
 
+**Decide before you READ the inputs.** This is the sharpest version of the rule, and the easiest to
+get wrong. If you open the files to judge whether the task is worth delegating, you have already done
+the expensive part — and delegating afterwards is theatre, because the work is spent either way. So
+"I've already read the material, it'd be quicker to just do it now" is **evidence the decision came
+too late**, not a reason to keep it on cloud. Decide from the *shape* of the step, which you know at
+decomposition, not from its contents.
+
+If you catch yourself there anyway, a dispatch still buys something real: run it as an **independent
+cross-check** of the work you just did. Diffing your output against a local model's is a genuine
+second use, and it costs nothing.
+
 **Make it a required column in the plan — don't leave it implicit** (an implicit "I'll offload
 later" reliably becomes "I did it all on cloud"). For any multi-step task that touches files or has
 bulk/mechanical steps — and *always* under a budget constraint — annotate **every** step:
@@ -23,10 +34,53 @@ bulk/mechanical steps — and *always* under a budget constraint — annotate **
 - `cloud:<reason>` — kept on the cloud model, with the reason named.
 
 **Default to `operator`.** Under a budget constraint the burden flips: a step is `local:operator`
-unless you can name why it's `cloud:`. Valid `cloud:` reasons are of two kinds:
-- **quality/capability** — frontier reasoning, security-critical, or final review/verification; and
+unless you can name why it's `cloud:`. Valid `cloud:` reasons:
+- **quality/capability** — frontier reasoning, security-critical, or final review/verification;
+- **coupled tool-work** — it needs this session's live context and tool state;
 - **cost-benefit** — the work is small or one-off and the spin-up/briefing overhead would exceed the
-  saving (`cloud:not worth offloading`). This is a first-class, legitimate reason, not a cop-out.
+  saving (`cloud:not worth offloading`). Legitimate, but see the trap below before reaching for it.
+
+### What QUALIFIES for local — the positive test
+
+Listing only what's *excluded* makes the rule unfalsifiable, so here is the shape that qualifies:
+
+> **A self-contained transformation over many similar inputs, whose output is checkable against the
+> source.** Cheap to verify, tedious to do by hand.
+
+Extraction, classification, mechanical test-matrix expansion against a harness that already exists, a
+first-pass draft that will be reviewed anyway, reformatting a corpus. The *checkable* part is what
+makes trusting a smaller model safe: you are not taking its word, you are diffing it against ground
+truth.
+
+Worked example, measured: pulling `(target, milestone)` dependency pairs out of 15 free-text notes.
+One dispatch, ~1.2k prompt / ~1k completion tokens, about a minute, **$0**. It returned 19 pairs and
+all 19 verified — every target present verbatim in the source *and* a real id in the store, every
+milestone verbatim. It also correctly **excluded** three near-misses that needed judgement: a "see
+also" cross-reference, a sibling the note mentioned as also-blocked rather than as a dependency, and a
+parenthetical aside. **If a step fits this shape and you keep it on cloud, that is the miss.**
+
+### The trap: two escape hatches that cover everything
+
+`quality-critical` and `not worth offloading` are **jointly exhaustive** — between them they can
+justify keeping *any* step on cloud. Each individual call looks defensible; the pattern only shows up
+in the aggregate. A measured instance: four delegatable steps in one plan, four `cloud:` annotations,
+two citing each reason, **zero local dispatches** — and every one was individually arguable.
+
+Three rules that make the pair falsifiable again:
+
+1. **A `cloud:` reason must be checkable, and should name its expiry.** "The local endpoint is
+   currently serving an interactive session" is good: you can verify it before asserting it, and it
+   stops being true later. A reason you cannot check is a preference wearing a reason's clothes.
+2. **"Too hard to delegate" is a SPEC gap, not a model limit.** If the work is too tangled to hand
+   over, that says the task isn't specified yet. Split it: `cloud:spec` to write the design, then
+   `local:` for the slices the spec produces. That converts an unfalsifiable verdict into two
+   actionable steps.
+3. **Watch the distribution, not the step.** If a plan comes out with **zero** local steps, that is
+   the thing to justify — one explicit sentence at plan level about why nothing in it qualified. A
+   per-step shrug does not discharge it.
+
+Also not a reason: **"local is slow."** Check what the current runtime actually is before assuming;
+timings from a superseded backend are not evidence about the one you'd dispatch to now.
 
 **Offload is the default, not a mandate.** The point is to stop *reflexively* doing bulk/mechanical
 work on the paid model — not to force a local hop onto trivia where it costs more than it saves. When
