@@ -8,6 +8,41 @@ Where no Git tag exists, the release heading links directly to its release commi
 
 ## [Unreleased]
 
+Planned-but-unshipped work is tracked in **[`docs/ROADMAP.md`](docs/ROADMAP.md)**, not here. This
+section stays empty between releases on purpose: an empty heading was previously mistaken for "there
+is no unshipped spec", when in fact the whole `0.14.0` specification existed outside the repository.
+
+## [0.13.5] — 2026-09-01
+
+Release hygiene. No behaviour change to any backend or launcher.
+
+### Added
+
+- **`docs/ROADMAP.md`** — what is specced but not shipped. `0.13.0`'s changelog claimed to add
+  "changelog and roadmap documentation" and only the changelog appeared, so the entire `0.14.0`
+  specification lived in a plan file on one machine while `[Unreleased]` sat literally empty. "Did we
+  skip a specced feature?" was not answerable from the repo. It now is: every `0.14.0` phase,
+  identity layer, release gate and explicit non-goal is listed with status, and an item can only
+  leave the file by appearing in this changelog under a real version, or by moving to a deferred
+  list with a stated reason.
+- The roadmap also records why `0.13.x` is being used for work that would conventionally earn a
+  minor bump: **the version number is the release gate for `0.14.0`.** A released `0.14.0` meeting
+  half its gates cannot be un-released.
+
+### Fixed
+
+- **`tests/test_rapid_backend.sh` no longer leaks its stub servers**, and now sweeps stubs left by an
+  earlier run at startup as well as in the EXIT trap. The trap alone was insufficient because hotswap
+  launches stubs with `nohup`, so they outlive the shell that recorded their pids.
+  This was worse than untidiness: a leaked stub keeps LISTENing on 8100, so the next run lands on
+  8101 and `SUCCESS_PORT=8100` fails along with every argv assertion after it. Measured **19 passed /
+  10 failed with nothing wrong in the code under test**, then 29/0 immediately after reaping — it
+  bit three times while consolidating `0.13.1`–`0.13.4`. A genuine regression and self-contamination
+  were indistinguishable, which is the failure mode that gets a correct change reverted.
+  Matching is on the sandbox marker in the process command line, never on the port alone, so the
+  sweep can never touch a live local session on 8000-8010. Verified idempotent: three consecutive
+  runs, 29/29 each, zero leaked listeners after every one.
+
 ## [0.13.4] — 2026-09-01
 
 ### Added

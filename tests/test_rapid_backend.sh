@@ -20,7 +20,8 @@
 #     end without loading 16 GB of weights or binding a real model.
 #   * Test ports are 8100+ (LA_PORT_START/MAX set in the sandbox config), NEVER
 #     8000-8010, so the harness can't touch a live local session's server. Stubs
-#     are killed in an EXIT trap.
+#     are killed in an EXIT trap AND swept at STARTUP — see reap_stale_stubs below
+#     for why the trap alone was not enough.
 #
 # COVERED here (the genuinely new rapid logic):
 #   * hotswap: rapid command construction (flags, parser translation, thinking on/off,
@@ -47,6 +48,29 @@ assert_grep() {  # $1=needle, $2=haystack, $3=label
 }
 
 # --- sandbox -----------------------------------------------------------------
+# --- reap stubs left behind by an EARLIER run ---------------------------------
+# The EXIT trap does not always fire (a kill, a crash, an interrupted run), and a leaked stub is far
+# worse here than an untidy process: it still LISTENs on 8100, so the next run lands on 8101, the
+# "prints SUCCESS_PORT on a free test port" assertion fails, and every argv assertion downstream
+# fails with it. Measured: 19 passed / 10 failed with nothing wrong in the code under test, then 29/0
+# immediately after reaping. A real regression and self-contamination therefore look IDENTICAL —
+# which is exactly the failure mode that gets a correct change reverted.
+#
+# Matching is on the SANDBOX MARKER in the process command line, never on the port alone: a live
+# local session sits on 8000-8010 and this must never be able to touch it. The marker restricts the
+# blast radius to this harness's own mktemp directories.
+reap_stale_stubs() {
+  local pid
+  for pid in $(lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null \
+                 | awk '$9 ~ /:81[0-9][0-9]$/ {print $2}' | sort -u); do
+    if ps -o command= -p "$pid" 2>/dev/null | grep -q 'la-rapid-test'; then
+      echo "  (reaping stub $pid left by an earlier run)" >&2
+      kill "$pid" 2>/dev/null
+    fi
+  done
+}
+reap_stale_stubs
+
 SB="$(mktemp -d "${TMPDIR:-/tmp}/la-rapid-test.XXXXXX")"
 mkdir -p "$SB/home/.models/FakeModel" "$SB/home/.stub" "$SB/home/.claude/logs/local-agents-configs"
 cp -R "$REPO/bin" "$SB/bin"
@@ -107,6 +131,10 @@ CFG
 STUB_PIDS=()
 cleanup() {
   for pid in "${STUB_PIDS[@]:-}"; do kill "$pid" 2>/dev/null; done
+  # STUB_PIDS only holds pids this shell knows about; hotswap launches its stubs with nohup, so a
+  # stub can outlive the shell that started it and never appear here. Sweep the port range too,
+  # again marker-matched, so the suite leaves nothing behind for the next run to trip over.
+  reap_stale_stubs
   rm -rf "$SB"
 }
 trap cleanup EXIT

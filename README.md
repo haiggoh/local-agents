@@ -101,6 +101,12 @@ auto-discovers brew → `PATH` → newest `~/.venvs/rapid-mlx-*`, so a machine t
 install still works. The weekly `local-stack-update-check` launchd job watches PyPI for new Rapid
 releases and only *notifies* — it never installs.
 
+## Roadmap
+
+What shipped is in [`CHANGELOG.md`](CHANGELOG.md). What is **specced but not shipped** — the
+`0.14.0` runtime-profiles architecture, its release gates, and the things deliberately deferred — is
+in [`docs/ROADMAP.md`](docs/ROADMAP.md).
+
 ## What's in the box
 
 - **`bin/launch-claude-agent.sh`** — start an interactive local Claude Code session (hotswaps a
