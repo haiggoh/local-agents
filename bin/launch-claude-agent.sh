@@ -32,6 +32,16 @@ if [ -z "$MODEL_ALIAS" ] && [ -z "${LA_MENU_REDIRECT:-}" ] && [ -x "$LAUNCH_DIR/
     export LA_MENU_REDIRECT=1
     exec "$LAUNCH_DIR/csl"
 fi
+# --auto: hand off to the local auto-mode launcher (Phase 8). Instead of accepting edits, this
+# launches a session in `auto` permission mode whose SEPARATE safety-classifier is pointed at a
+# warmed local backend (with a free slot), so a cloud 429 / budget-limit can't force the acceptEdits
+# fallback. It is OFF by default and requires the caller to flip JOYIA_LOCAL_AUTO_CLASSIFIER=1. The
+# wrapper validates the opt-in, so this is just an early, friendly dispatch. Caller syntax:
+#   launch-claude-agent.sh --auto <main-alias> [a|b] [effort]
+#   a = raise --max-num-seqs to 2 on that server (default, reuse weights); b = separate small model.
+if [ "${1:-}" = "--auto" ]; then
+    exec "$LAUNCH_DIR/launch-local-auto-mode.sh" "${@:2}"
+fi
 if [ -z "$MODEL_ALIAS" ] || ! la_lookup "$MODEL_ALIAS"; then
     la_retired_hint "$MODEL_ALIAS" || true
     echo "Usage: $0 <alias> [effort-override]"; echo "Registered aliases:"; la_aliases_help
