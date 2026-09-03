@@ -31,6 +31,44 @@ profiles architecture and must not be spent on anything else, because a prematur
 make the gate list below unverifiable — a released `0.14.0` that meets only half its gates cannot be
 un-released. Patch-level bumps below it are the cost of keeping that guarantee.
 
+`main` currently carries **unreleased** work past the `0.13.7` tag: the per-model auto-compaction
+profiles described under `[Unreleased]` in `CHANGELOG.md`. That is landed code awaiting a release
+number, not specification — so it lives in the changelog, and only the sections below are specs.
+
+---
+
+## Runtime direction — Ornith, and the 200K context finding
+
+**Status: settled as a direction, unfinished as an implementation.**
+
+The branch `experiment/ornith-200k-autocompact` has been **merged deliberately**. It is no longer an
+experiment; it is the intended direction for full local sessions. What it established:
+
+| Question | Result |
+|---|---|
+| Interactive speed vs Qwen 3.8 | **Markedly faster** in real Claude Code use |
+| Advertised context | **200K+**, confirmed in the model's own documentation |
+| Stability well past 100K, no auto-compaction | **Held** — no instability observed |
+| Suitability for a *full* local session | **Yes** — not merely stateless dispatch |
+
+**Why the context result matters beyond one model.** A 100K local threshold was always a *fallback
+guess*, never a measured property: prior local failures clustered near 103K–105K, and the native
+`--autocompact` minimum is itself 100K, so no lower threshold was even enforceable. A model that
+runs far past 100K with compaction switched off shows that the ceiling is per-artifact — a function
+of model, quantization, runtime, backend and co-residency — rather than a universal constant. This
+is exactly the distinction the catalogue work insists on: **an architectural maximum is not the
+tested safe operating limit.** Ornith supplies the first strong data point for a `tested_safe`
+value that is not a guess.
+
+**What this does NOT do.** It discharges no `0.14.0` release gate, promotes no roster-wide default,
+and is not a controlled benchmark. It is a proof of concept, and the remaining work is largely the
+`0.14.0` programme below — which is why the merge changes direction without changing status.
+
+Cross-references: waypoint `local-model-context-catalogue` owns the per-model context fields this
+evidence feeds (`advertised` / `runtime_supported` / `tested_safe` / `auto_compact_window`, each with
+evidence and a test date); `local-compaction-and-metal` owns the compaction-and-Metal qualification
+that must still be run per promoted profile.
+
 ---
 
 ## `0.14.0` — Runtime profiles and Rapid-first model management

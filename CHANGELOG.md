@@ -8,9 +8,46 @@ Where no Git tag exists, the release heading links directly to its release commi
 
 ## [Unreleased]
 
-Planned-but-unshipped work is tracked in **[`docs/ROADMAP.md`](docs/ROADMAP.md)**, not here. This
-section stays empty between releases on purpose: an empty heading was previously mistaken for "there
-is no unshipped spec", when in fact the whole `0.14.0` specification existed outside the repository.
+Planned-but-unshipped *specification* work is tracked in **[`docs/ROADMAP.md`](docs/ROADMAP.md)**,
+not here: an empty heading was previously mistaken for "there is no unshipped spec", when in fact
+the whole `0.14.0` specification existed outside the repository. Code that has landed on `main` and
+is waiting for a release number does belong here, and is listed below.
+
+### Added
+
+- **Per-model auto-compaction profiles for local sessions.** `config-lib.sh` gained the optional
+  associative array `LA_SESSION_AUTO_COMPACT`, keyed by model alias, and `csl` applies the selected
+  model's value by exporting `LA_AUTO_COMPACT_WINDOW` into the launcher it execs. The export is
+  deliberately confined to that child process, so it can neither propagate back into the parent
+  shell nor reach an independently launched cloud session — a local context policy must never
+  become a global Claude Code setting.
+- `tests/test_session_profiles.sh` covering the override.
+
+### Changed
+
+- **Argument passthrough now receives the same profile as an interactive choice.** `csl <alias>`
+  previously `exec`ed the launcher *before* the config was loaded, so a model selected by argument
+  silently got no profile while the same model chosen from the numbered menu got one. Passthrough
+  still skips the picker and the watcher; it no longer skips the profile.
+
+### Runtime direction — Ornith is no longer an experiment
+
+The branch that produced the work above was named `experiment/ornith-200k-autocompact`. It has been
+merged deliberately, because the experiment succeeded and the question it was asking is settled:
+
+- **Ornith is markedly faster than Qwen 3.8** in real interactive use, which makes it uniquely
+  suited to driving a *full* local session rather than only stateless dispatch.
+- **The 200K+ context window is confirmed in the model's own documentation**, and a practical test
+  showed it stays stable well past 100K tokens **with no auto-compaction at all**. That is the
+  finding that matters, because it contradicts the older working assumption behind a 100K local
+  threshold — prior local failures had clustered near 103K–105K, and 100K was only ever a fallback
+  guess, never a measured property of every model.
+- Consequently Ornith is treated as the intended direction for local sessions, not a candidate
+  under evaluation.
+
+This is a **proof of concept, not a finished migration.** Substantial work remains, most of it
+already specified as part of `0.14.0`; see [`docs/ROADMAP.md`](docs/ROADMAP.md). Nothing here
+promotes a roster-wide default or discharges any `0.14.0` release gate.
 
 ## [0.13.7] — 2026-09-01
 
