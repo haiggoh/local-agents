@@ -94,7 +94,8 @@ for ((port=LA_PORT_START; port<=LA_PORT_MAX; port++)); do
             _meta_alias=$(awk -F= '$1=="alias"{print substr($0,index($0,"=")+1)}' "$_meta" 2>/dev/null)
             _meta_model=$(awk -F= '$1=="model_dir"{print substr($0,index($0,"=")+1)}' "$_meta" 2>/dev/null)
             _meta_pid=$(awk -F= '$1=="pid"{print $2}' "$_meta" 2>/dev/null)
-            if [ "$_meta_backend" = "rapid" ] &&
+            if [ "${LA_HOTSWAP_FORCE_FRESH:-0}" != "1" ] &&
+               [ "$_meta_backend" = "rapid" ] &&
                [ "$_meta_alias" = "$MODEL_NAME" ] &&
                [ "$_meta_model" = "$MODEL_DIR" ] &&
                [ -n "$_listener_pid" ] &&
@@ -117,6 +118,12 @@ for ((port=LA_PORT_START; port<=LA_PORT_MAX; port++)); do
             # Match the DISTINCT alias/dir id (served alongside the shared spoof) so tiers sharing a
             # spoof don't wrongly reuse each other's server.
             echo "✅ $MODEL_NAME already healthy on port $port."
+            if [ "${LA_HOTSWAP_FORCE_FRESH:-0}" = "1" ]; then
+                echo "   (LA_HOTSWAP_FORCE_FRESH=1 — restarting to pick up changed config)"
+                _pid=$(lsof -t -i ":$port" -sTCP:LISTEN 2>/dev/null | head -1)
+                [ -n "$_pid" ] && { kill -9 "$_pid"; sleep 1; }
+                TARGET_PORT=$port; break
+            fi
             # Reuse is a speed win but it silently inherits the OLD process's flags: a server started
             # before --timeout was set keeps vllm-mlx's 300s default and will keep killing streaming
             # turns mid-generation. Serve flags are fixed at launch, so the only fix is a restart —

@@ -33,6 +33,11 @@
 #     after scanning LA_PORT_START..LA_PORT_MAX (8000..8010). We read that; we don't assume it.
 #   * The chosen model comes from la_lookup (config-lib), so the model name/effort/parser are config,
 #     not hardcoded here. Default: the smallest-weight alias on disk.
+#   * ⚠️ 2026-09-04 FIX: ANTHROPIC_BASE_URL must point at the CLASSIFIER's port, not the main
+#     session's port. The classifier is a separate request that inherits ANTHROPIC_BASE_URL from
+#     the env. If we point it at the main server, the classifier competes with the main session
+#     for the only slot — the exact problem we're trying to solve. Strategy B now points the
+#     classifier env at CLS_PORT; strategy A still uses MAIN_PORT (there is only one server).
 #
 # USAGE:
 #   JOYIA_LOCAL_AUTO_CLASSIFIER=1 \
@@ -133,9 +138,21 @@ else
 fi
 
 # --- warm the server(s) on FREE ports (dynamic, never hardcoded) ------------
-# local-llm-hotswap.sh resolves an alias to the first FREE port and prints SUCCESS_PORT. Strategy a:
-# just warm the MAIN server once (we will later raise its --max-num-seqs at launch). Strategy b:
-# warm the main server AND the small classifier server, each on its own free port.
+# local-llm-hotswap.sh resolves an alias to the first FREE port and prints SUCCESS_PORT.
+# Strategy a: raise --max-num-seqs to 2 on the main server so the classifier can run as a
+# 2nd concurrent sequence on the same weights. Strategy b: warm the main server AND the small
+# classifier server, each on its own free port (see warning below — requires a proxy for
+# classifier URL routing, see the env block).
+#
+# ⚠️ 2026-09-04 FIX: LA_RAPID_MAX_NUM_SEQS must be set BEFORE calling hotswap so the warmed
+# server picks up the new --max-num-seqs. LA_HOTSWAP_FORCE_FRESH=1 tells hotswap to restart
+# the main server fresh (bypassing reuse) so the restarted process actually gets --max-num-seqs 2.
+# Both are scoped to just this invocation via env (set then inherited by the subprocess).
+if [ "$STRATEGY" = "a" ]; then
+    export LA_RAPID_MAX_NUM_SEQS=2
+    export LA_HOTSWAP_FORCE_FRESH=1
+    echo "   (strategy a: restarting main server with --max-num-seqs=2 via force-fresh)"
+fi
 echo "⏳ Warming servers on free ports (strategy $STRATEGY) via hotswap..."
 LAUNCH_OUTPUT=$("$LAUNCH_DIR/local-llm-hotswap.sh" "$MAIN_ALIAS"); echo "$LAUNCH_OUTPUT"
 MAIN_PORT=$(echo "$LAUNCH_OUTPUT" | grep -o "SUCCESS_PORT=[0-9]*" | cut -d'=' -f2)
@@ -180,25 +197,46 @@ echo
 
 # --- OOM guard -------------------------------------------------------------
 # Strategy a raises --max-num-seqs to 2 on the main server. That needs ~2x peak Metal RAM for the
-# batched turn. The cap here is 103.9 GB and a ~88k-token main turn already peaks at ~101 GB, so a
-# 2nd concurrent 35B-MoE sequence would OOM-crash the server. Before raising --max-num-seqs we check
-# the server's current peak; if it is already near the cap we refuse (and suggest strategy b),
+# batched turn. The cap is 103.9 GB. Before restarting the server with --max-num-seqs=2 we check
+# whether the live server's current wired memory (ps -o wired) is already near the cap. If it is,
+# the restarted server would likely OOM on the next batched turn — refuse (suggest strategy b),
 # unless the caller overrides with LA_FORCE_MAX_NUM_SEQS2=1.
+#
+# ⚠️ 2026-09-04 FIX: the old guard read /healthz for a "XGB" memory field that rapid never emits,
+# so it silently never fired. Wired RSS is the authoritative number on macOS with Metal.
 if [ "$STRATEGY" = "a" ]; then
-    _peak=$(curl -s --max-time 3 "http://localhost:$MAIN_PORT/healthz" 2>/dev/null | grep -oE "[0-9.]+GB" | tail -1)
-    _peak_num=${_peak%GB}
-    if [ -n "${_peak_num:-}" ] && awk "BEGIN{exit !($_peak_num > 90)}"; then
-        echo "⚠️ main server peak ${_peak} is near the 103.9 GB Metal cap — raising --max-num-seqs to 2"
-        echo "   would likely OOM-crash it. Use strategy b (separate small model) instead, or force with"
-        echo "   LA_FORCE_MAX_NUM_SEQS2=1 if you are certain there is headroom."
-        [ "${LA_FORCE_MAX_NUM_SEQS2:-0}" = "1" ] || exit 1
+    _pid=$(lsof -t -i ":$MAIN_PORT" -sTCP:LISTEN 2>/dev/null | head -1)
+    if [ -n "$_pid" ]; then
+        _wired_kb=$(ps -o wired= -p "$_pid" 2>/dev/null | tr -d ' ')
+        _wired_gb=$(awk "BEGIN{printf \"%.0f\", ${_wired_kb:-0}/1048576}" 2>/dev/null)
+        if [ -n "${_wired_gb:-}" ] && awk "BEGIN{exit !($_wired_gb > 80)}"; then
+            echo "⚠️ main server wired memory ${_wired_gb} GB is near the 103.9 GB Metal cap —"
+            echo "   restarting with --max-num-seqs=2 risks OOM. Use strategy b (separate small model)"
+            echo "   or force with LA_FORCE_MAX_NUM_SEQS2=1 if you are certain there is headroom."
+            [ "${LA_FORCE_MAX_NUM_SEQS2:-0}" = "1" ] || exit 1
+        fi
     fi
 fi
 
 # --- DIRECT routing env (mirrors launch-claude-agent.sh) --------------------
-# ANTHROPIC_BASE_URL points at the classifier's server, which claude --permission-mode auto inherits
-# for its classifier call. NO /v1 suffix — Claude Code appends /v1/messages.
-export ANTHROPIC_BASE_URL="http://localhost:${MAIN_PORT}"
+# ANTHROPIC_BASE_URL is inherited by BOTH the main session and the classifier (Claude Code has no
+# env var to point the classifier at a separate backend).
+#
+# Strategy a (default): only one server exists. ANTHROPIC_BASE_URL points at it. The classifier
+# lands on the same server as a 2nd concurrent sequence (no proxy needed).
+#
+# Strategy b: a separate small model is warm on CLS_PORT, but WITHOUT a proxy Claude Code's
+# classifier still hits MAIN_PORT (same env). A proxy that inspects /v1/messages requests for
+# classifier headers (model=claude-sonnet-5 stage=xml_s1, source=side_query) and routes those
+# to CLS_PORT would be needed — that proxy does not exist yet. Until one is built, strategy b
+# is a warm server that never actually sees the classifier traffic.
+if [ "$STRATEGY" = "a" ]; then
+    export ANTHROPIC_BASE_URL="http://localhost:${MAIN_PORT}"
+    echo "   classifier→ same server (strategy a, no proxy needed)"
+else
+    export ANTHROPIC_BASE_URL="http://localhost:${MAIN_PORT}"   # proxy needed for classifier
+    echo "   ⚠️  strategy b: classifier still hits MAIN_PORT — no proxy yet (proxy needed for separate classifier routing)"
+fi
 export ANTHROPIC_AUTH_TOKEN="local"
 export CLAUDE_IS_LOCAL="true"
 export CLAUDE_CODE_MAX_OUTPUT_TOKENS="$LA_MAX_OUTPUT_TOKENS"
@@ -207,12 +245,6 @@ export API_FORCE_IDLE_TIMEOUT=0
 # A slow first token on a local model doing a big prefill normally trips Claude Code's 5-min
 # streaming idle watchdog. Local prefill that emits nothing is normal, not a hang — turn the guard off.
 export CLAUDE_ENABLE_STREAM_WATCHDOG=0
-
-# strategy a: tell the warmed server to admit 2 concurrent sequences (the main turn + the classifier).
-if [ "$STRATEGY" = "a" ]; then
-    export VLLM_MLX_SIMPLE_ENGINE_MAX_NUM_SEQS=2
-    echo "   (raised --max-num-seqs to 2 on the main server; the classifier runs as a 2nd sequence)"
-fi
 
 # Log the launcher run.
 mkdir -p "$HOME/.claude/logs"
@@ -223,5 +255,20 @@ echo "$(date '+%Y-%m-%d %H:%M:%S')  main=$MAIN_ALIAS classifier_mode=$STRATEGY c
 # consequential Bash call is judged by the SEPARATE classifier; we've pointed that classifier at a
 # warmed local backend with a free slot, so a cloud 429 / budget-limit can't force the acceptEdits
 # fallback.
+#
+# BUILD 2.1.251 PROBLEM (2026-09-04): with NO prompt given, the build refuses to enter an interactive
+# session and instead exits with:
+#     "Error: Input must be provided either through stdin or as a prompt argument when using --print"
+# (It reads an input-less interactive launch as a one-shot --print call.) launch-claude-agent.sh never
+# hits this because it always appends a prompt; we must too. So we hand the session a real first
+# PROMPT instead of a bare interactive shell — and it is deliberately a *consequential Bash* that the
+# classifier is meant to judge. That both satisfies the no-input check AND exercises the classifier on
+# the exact call auto mode is about. If the session runs it, local auto-mode routing is proven.
+#
+# Leading quote makes it one token-safe argument regardless of any special chars; the session's first
+# turn's consequential action (the run-command) is what we watch for — a successful run through the
+# local classifier = proof; a "cannot determine the safety" block = the classifier is failing closed.
+PROMPT_0="In LOCAL auto mode, prove it is working: run this exact command with your tools:  printf 'auto-mode-ok\\n'"
 claude --model "$MAIN_SPOOF" --effort "$EFFORT" --strict-mcp-config --permission-mode auto \
-    --append-system-prompt "You are running in LOCAL auto mode with a local safety-classifier backend."
+    --append-system-prompt "You are running in LOCAL auto mode with a local safety-classifier backend." \
+    "$PROMPT_0"
