@@ -328,12 +328,14 @@ la_load_config() {
   #
   # Effect today: max_concurrent_requests=2 means one request runs and one queues; a third gets HTTP
   # 503 + Retry-After. A dispatch sent to a busy session's server therefore WAITS for the turn.
-  # ⚠️ Raising this is gated on the Metal-ceiling work (waypoint rapid-cache-profiles-the), NOT on
-  # taste. Until then, the supported way to run a session and a dispatch on the same model
-  # concurrently is a SECOND server instance on another port — 27B 4-bit weights are ~16 GB, so two
-  # instances fit where two long contexts do not. Note hotswap currently REUSES a healthy matching
-  # server by design, so that needs a deliberate opt-out rather than just being available.
-  : "${LA_RAPID_MAX_NUM_SEQS:=1}"
+  # 2 = needed for the auto-mode classifier (2nd concurrent sequence on the same weights).
+  # The classifier prompt is tiny (tool-calls + policy), so memory overhead is dominated by the
+  # 2nd sequence's KV cache, which fits within the Metal cap on 128GB machines for 4-bit models.
+  # ⚠️ Raising this further (beyond 2) is gated on the Metal-ceiling work (waypoint
+  # rapid-cache-profiles-the), NOT on taste. To run a session AND a dispatch concurrently on the
+  # same model, a SECOND server instance on another port is still the supported path — 27B 4-bit
+  # weights are ~16 GB, so two instances fit where two long contexts do not.
+  : "${LA_RAPID_MAX_NUM_SEQS:=2}"
   : "${LA_RAPID_MAX_CONCURRENT_REQUESTS:=2}"
   # Optional per-machine extras a user may want the agent prompt to know about (all optional):
   : "${LA_MEMORY_DIR:=}"          # absolute path to your auto-memory dir, if you want the agent told

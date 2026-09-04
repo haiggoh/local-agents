@@ -35,12 +35,21 @@ fi
 # --auto: hand off to the local auto-mode launcher (Phase 8). Instead of accepting edits, this
 # launches a session in `auto` permission mode whose SEPARATE safety-classifier is pointed at a
 # warmed local backend (with a free slot), so a cloud 429 / budget-limit can't force the acceptEdits
-# fallback. It is OFF by default and requires the caller to flip JOYIA_LOCAL_AUTO_CLASSIFIER=1. The
-# wrapper validates the opt-in, so this is just an early, friendly dispatch. Caller syntax:
-#   launch-claude-agent.sh --auto <main-alias> [a|b] [effort]
-#   a = raise --max-num-seqs to 2 on that server (default, reuse weights); b = separate small model.
+# fallback.
+#
+# Auto mode is controlled by the env var LA_AUTO_MODE=1 (set by the CSL toggle). The --auto
+# positional flag is retained for backward compatibility (launch-local-auto-mode.sh dispatch path)
+# but is superseded by the env var — callers should set LA_AUTO_MODE=1 instead.
+#
+# When auto mode is on we also set LA_HOTSWAP_FORCE_FRESH=1 so the server is (re)started with
+# --max-num-seqs=2, giving the classifier a slot even if a matching server was already running.
+# The --max-num-seqs default is 2 (see config-lib.sh), so LA_RAPID_MAX_NUM_SEQS needs no override.
 if [ "${1:-}" = "--auto" ]; then
     exec "$LAUNCH_DIR/launch-local-auto-mode.sh" "${@:2}"
+fi
+: "${LA_AUTO_MODE:=0}"
+if [ "$LA_AUTO_MODE" = "1" ]; then
+    : "${LA_HOTSWAP_FORCE_FRESH:=1}"
 fi
 if [ -z "$MODEL_ALIAS" ] || ! la_lookup "$MODEL_ALIAS"; then
     la_retired_hint "$MODEL_ALIAS" || true
@@ -314,7 +323,8 @@ echo "🧾 Local agent prompt: $LA_AGENT_PROMPT_FILE ($(printf '%s' "$AGENT_PROM
 
 # Log which model drives this session (the spoof id is shared across tiers, so the alias lives here).
 mkdir -p "$HOME/.claude/logs"
-echo "$(date '+%Y-%m-%d %H:%M:%S')  alias=$MODEL_ALIAS  spoof=$MODEL_SPOOF effort=$EFFORT  backend=$BACKEND  declared=$BACKEND_DECLARED  vllm_port=$VLLM_PORT  mode=direct" >> "$HOME/.claude/logs/local-agents-sessions.log"
+if [ "$LA_AUTO_MODE" = "1" ]; then _LA_MODE="auto"; else _LA_MODE="direct"; fi
+echo "$(date '+%Y-%m-%d %H:%M:%S')  alias=$MODEL_ALIAS  spoof=$MODEL_SPOOF effort=$EFFORT  backend=$BACKEND  declared=$BACKEND_DECLARED  vllm_port=$VLLM_PORT  mode=$_LA_MODE" >> "$HOME/.claude/logs/local-agents-sessions.log"
 echo "🧭 Session engine: $MODEL_ALIAS  (direct; logged to ~/.claude/logs/local-agents-sessions.log)"
 
 # Record WHICH transcript this session writes, so watchers never have to guess it.
@@ -360,7 +370,19 @@ for _la_old in "$HOME"/.claude/logs/local-agents-session-*.transcript "$HOME"/.c
   kill -0 "$_la_pid" 2>/dev/null || rm -f "$_la_old"
 done
 
-# --permission-mode acceptEdits (NOT auto): auto mode uses the session model as a tool-safety
-# CLASSIFIER, but the local spoofed model can't serve that call, so auto loops on "temporarily
-# unavailable". acceptEdits uses static rules (edits auto-apply, other tools prompt).
-claude --model "$MODEL_SPOOF" $EFFORT_FLAG $STRICT_FLAG $DENY_FLAG --permission-mode acceptEdits --append-system-prompt "$AGENT_PROMPT" "${CLAUDE_EXTRA_ARGS[@]}"
+# --permission-mode: auto when LA_AUTO_MODE=1 (set by the CSL toggle), acceptEdits otherwise.
+# In auto mode every consequential Bash call is judged by the SEPARATE classifier, which is
+# pointed at the warmed local backend (same server, --max-num-seqs=2 gives it a slot), so a
+# cloud 429 / budget-limit can't force the acceptEdits fallback.
+if [ "$LA_AUTO_MODE" = "1" ]; then
+    _PERM_MODE="auto"
+    _AUTO_MODE_APPEND="You are running in LOCAL auto mode with a local safety-classifier backend."
+else
+    _PERM_MODE="acceptEdits"
+    _AUTO_MODE_APPEND=""
+fi
+# --append-system-prompt with auto mode to remind the session of its mode (no-op in acceptEdits).
+if [ -n "$_AUTO_MODE_APPEND" ]; then
+    CLAUDE_EXTRA_ARGS+=(--append-system-prompt "$_AUTO_MODE_APPEND")
+fi
+claude --model "$MODEL_SPOOF" $EFFORT_FLAG $STRICT_FLAG $DENY_FLAG --permission-mode "$_PERM_MODE" --append-system-prompt "$AGENT_PROMPT" "${CLAUDE_EXTRA_ARGS[@]}"

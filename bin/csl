@@ -43,6 +43,12 @@ _apply_session_profile() {
   fi
 }
 
+# Auto-mode toggle state. When ON, the launcher runs `claude --permission-mode auto` instead of
+# `acceptEdits`, so every consequential Bash call is judged by the separate safety-classifier
+# routed to the local backend (same server, --max-num-seqs=2 gives it a slot). The toggle is
+# inherited by the launcher via LA_AUTO_MODE=1 and is not persisted to the parent shell.
+AUTO_MODE="${CSL_AUTO_MODE:-0}"
+
 # Argument passthrough still skips the picker and watcher. It now receives the
 # same selected-model profile as an interactive numbered choice.
 if [ "$#" -gt 0 ]; then
@@ -115,7 +121,7 @@ OSA
       echo "👁  watcher (run in another terminal): $WATCHER --attach $$"
     fi
   fi
-  if [ -n "$effort" ]; then exec "$LAUNCHER" "$alias" "$effort"; else exec "$LAUNCHER" "$alias"; fi
+  if [ -n "$effort" ]; then exec env LA_AUTO_MODE="$AUTO_MODE" "$LAUNCHER" "$alias" "$effort"; else exec env LA_AUTO_MODE="$AUTO_MODE" "$LAUNCHER" "$alias"; fi
 }
 
 while :; do
@@ -130,12 +136,15 @@ while :; do
   echo "  c) choose a listed model × custom effort"
   if [ "$WATCH" = "1" ]; then echo "  w) watcher: ON  — opens a window following this session (toggle)"
   else                        echo "  w) watcher: OFF — no monitor window (toggle)"; fi
+  if [ "$AUTO_MODE" = "1" ]; then echo "  a) auto-mode: ON  — classifier judges every consequential Bash call (toggle)"
+  else                           echo "  a) auto-mode: OFF — acceptEdits (edits auto-apply, tools prompt) (toggle)"; fi
   echo "  q) quit"
   echo
   printf "Selection [1]: "; read -r sel; sel="${sel:-1}"
   case "$sel" in
     q|Q) exit 0 ;;
     w|W) if [ "$WATCH" = "1" ]; then WATCH=0; else WATCH=1; fi; continue ;;
+    a|A) if [ "$AUTO_MODE" = "1" ]; then AUTO_MODE=0; else AUTO_MODE=1; fi; continue ;;
     c|C)
       echo >&2
       echo "Models (on disk, session-capable):" >&2
