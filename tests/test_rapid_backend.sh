@@ -59,12 +59,19 @@ assert_grep() {  # $1=needle, $2=haystack, $3=label
 # Matching is on the SANDBOX MARKER in the process command line, never on the port alone: a live
 # local session sits on 8000-8010 and this must never be able to touch it. The marker restricts the
 # blast radius to this harness's own mktemp directories.
+#
+# BOTH markers must be listed. This file makes two sandboxes — la-rapid-test and la-warmup-skip —
+# and matching only the first left the warmup-skip sandbox's stub listening on 8103 after every run:
+# swept by port, skipped by marker, so the reaper reported nothing while a stub was still up.
 reap_stale_stubs() {
   local pid
   for pid in $(lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null \
                  | awk '$9 ~ /:81[0-9][0-9]$/ {print $2}' | sort -u); do
-    if ps -o command= -p "$pid" 2>/dev/null | grep -q 'la-rapid-test'; then
-      echo "  (reaping stub $pid left by an earlier run)" >&2
+    if ps -o command= -p "$pid" 2>/dev/null | grep -qE 'la-rapid-test|la-warmup-skip'; then
+      # Deliberately not "left by an earlier run": this function is called BOTH at startup (where
+      # that is true) and from cleanup() at exit (where these are the current run's own nohup'd
+      # stubs). The old wording made a perfectly clean run look like it had inherited garbage.
+      echo "  (reaping sandbox stub $pid)" >&2
       kill "$pid" 2>/dev/null
     fi
   done
@@ -96,7 +103,17 @@ spoof = opt("--served-model-name", "stub")
 # Warmup-tracking endpoint: /v1/warmup records each probe body so tests can assert the POST was
 # actually sent (not just a false-positive from /v1/models succeeding). The warmup POST returns a
 # minimal choices block so the shell python3 one-liner in _preflight_warmup succeeds cleanly.
-WARMUP_LOG="$SB/home/.stub/warmup_log.jsonl"
+#
+# Resolve the log path at RUNTIME from HOME. This heredoc is deliberately quoted (<<'PY'), because
+# the body is Python and must not be touched by the shell — so a "$SB" written here would reach the
+# file as the literal three characters, `open()` would raise FileNotFoundError, do_POST would die
+# before answering, and the warmup probe would see an empty reply and report finish_reason=?. That
+# is exactly the bug this line used to have: it failed two assertions while looking like a warmup
+# regression in the SHIPPED script rather than a fault in the mock. HOME is set per sandbox by the
+# caller, so deriving from it is also correct for the second (WRUN) sandbox.
+WARMUP_LOG = os.environ.get("STUB_WARMUP_LOG") or os.path.join(
+    os.environ["HOME"], ".stub", "warmup_log.jsonl"
+)
 class H(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/v1/models":
@@ -118,6 +135,7 @@ class H(BaseHTTPRequestHandler):
             # model+messages+max_tokens payload, which we log so tests can inspect it).
             length = int(self.headers.get("Content-Length", 0))
             body = self.rfile.read(length) if length else b"{}"
+            os.makedirs(os.path.dirname(WARMUP_LOG), exist_ok=True)
             with open(WARMUP_LOG, "ab") as f:
                 f.write(json.dumps({"path": self.path, "body": body.decode("utf-8", errors="replace")}).encode() + b"\n")
             resp = json.dumps({"choices": [{"finish_reason": "stop"}]}).encode()
@@ -157,7 +175,12 @@ cleanup() {
   # stub can outlive the shell that started it and never appear here. Sweep the port range too,
   # again marker-matched, so the suite leaves nothing behind for the next run to trip over.
   reap_stale_stubs
-  rm -rf "$SB"
+  # Both sandboxes. This trap must stay the ONLY EXIT trap in the file: a later section once
+  # redefined it to kill a single pid and remove the dirs, which discarded the pid array and dropped
+  # the reap_stale_stubs sweep above — leaking stub servers on 8100/8101 after every run, the same
+  # leak the changelog records as fixed in 0.13.5. If you need something else cleaned up, extend
+  # this function; do not add a second trap.
+  rm -rf "$SB" ${WRUN:+"$WRUN"}
 }
 trap cleanup EXIT
 
@@ -269,25 +292,28 @@ WRUN=$(mktemp -d "${TMPDIR:-/tmp}/la-warmup-skip.XXXXXX")
 mkdir -p "$WRUN/home/.stub" "$WRUN/home/.models/FakeModel"
 cp -R "$SB/bin" "$WRUN/bin"; cp -R "$SB/config" "$WRUN/config"
 head -c 2097152 /dev/zero > "$WRUN/home/.models/FakeModel/weight.bin"
-cp -R "$SB/home/.stub" "$WRUN/home/.stub"   # preserve the stub binary
+# Copy the stub binary's CONTENTS, not the directory: `cp -R src/.stub dst/.stub` when dst/.stub
+# already exists (mkdir -p above) nests it as dst/.stub/.stub/, so the binary was landing one level
+# too deep and the launch below died with "rapid-mlx: No such file or directory".
+cp -R "$SB/home/.stub/." "$WRUN/home/.stub/"   # preserve the stub binary
 cp -R "$SB/home/.claude" "$WRUN/home/.claude" 2>/dev/null || true
+# This sandbox needs its OWN port range. It inherits 8100-8102 from the copied config, but by now
+# every one of those is occupied by a stub an earlier test launched — so the scan found no free port,
+# hotswap could not start, and no SUCCESS_PORT was ever printed. The previous version also tried to
+# bind its own stub on 8102 and died with "Address already in use", which is what made this look
+# like a warmup-skip failure rather than a port-exhaustion one.
+printf 'LA_PORT_START=8103\nLA_PORT_MAX=8105\n' >> "$WRUN/config/config.local.sh"
 # Write the warmup log to a known-empty state (so "not written" is observable).
 _WARMUP_LOG="$WRUN/home/.stub/warmup_log.jsonl"; rm -f "$_WARMUP_LOG"
-# Start a fresh stub on port 8102 (the last test port) so the scan finds it as "free".
-$WRUN/home/.stub/rapid-mlx --port 8102 --served-model-name "stub" &
-STUB_PIDS="$!"
-trap "kill $STUB_PIDS 2>/dev/null; rm -rf '$SB' '$WRUN'" EXIT
-# Wait for the stub to be ready.
-for _i in $(seq 1 30); do
-    curl -sf --max-time 2 http://127.0.0.1:8102/v1/models >/dev/null 2>&1 && break
-    sleep 0.2
-done
-# Reuse hits the port-8102 stub (it advertises the same spoof), so we hit the reuse branch.
-# Even if a fresh launch happens (e.g. a different test run reclaims 8102 first), the point is the
-# stub is never CONTACTED on /v1/chat/completions — which we can assert by checking the log is
-# still empty because the launch exits BEFORE the warmup call.
+# No hand-started stub here: the assertion is only that a launch still reports SUCCESS_PORT while
+# the warmup probe is skipped, and a FRESH launch on a free port exercises that directly. Forcing
+# the reuse branch needed a matching meta file this sandbox does not have, and the original comment
+# already conceded either branch was acceptable.
+# NOTE the LA_ prefix: _preflight_warmup reads LA_HOTSWAP_PREFLIGHT. This used to say
+# HOTSWAP_PREFLIGHT=0, which no code reads — so the skip was never actually requested and the test
+# asserted a skip that had not been asked for. A wrong env-var name fails OPEN and silently.
 OUT2=$(cd "$WRUN" && HOME="$WRUN/home" STUB_ARGV_FILE="$WRUN/argv5.json" HOTSWAP_READY_TIMEOUT=15 \
-       HOTSWAP_PREFLIGHT=0 bash "$WRUN/bin/local-llm-hotswap.sh" rapid-qwen-fast)
+       LA_HOTSWAP_PREFLIGHT=0 bash "$WRUN/bin/local-llm-hotswap.sh" rapid-qwen-fast)
 assert_grep "SUCCESS_PORT" "$OUT2" "still returns SUCCESS_PORT when warmup is skipped"
 if [ -f "$_WARMUP_LOG" ]; then
     _LOG_SIZE=$(wc -c < "$_WARMUP_LOG" 2>/dev/null | tr -d ' ')
