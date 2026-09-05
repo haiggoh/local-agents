@@ -467,6 +467,9 @@ it with `w` in the picker, or set `CSL_WATCH=1` to opt in by default.
 Auto mode is **on by default** — toggle it with `a`, or set `CSL_AUTO_MODE=0` to opt out. See the
 next section for what that actually buys and what it costs.
 
+Telemetry is **off by default** — toggle it with `t`, or set `CSL_TELEMETRY=1` to keep stock
+behaviour. See [A local session that is actually local](#a-local-session-that-is-actually-local).
+
 ### Auto Mode with a local classifier
 
 Claude Code's Auto Mode judges each consequential tool call with a **separate safety classifier**,
@@ -510,6 +513,44 @@ Anthropic's classifier, and its judgements have not been scored against it, so k
 for genuinely high-risk actions. And the airtight offline proof (block the gateway, then re-run) is
 still outstanding; the evidence above is a positive observation of the request arriving locally, not
 a demonstration that no fallback path exists.
+
+### A local session that is actually local
+
+Routing inference to your own machine does not, by itself, stop Claude Code talking to the internet.
+Measured on 2026-09-05: a session whose every inference request provably went to `127.0.0.1` still
+held two outbound HTTPS sockets — one to Anthropic (`160.79.104.10`) and one to Google/Statsig
+(`34.149.66.165`). Neither is inference and neither is the gateway, so neither shows up in a cost
+check or a routing check. They are simply outbound calls nobody asked for.
+
+The launcher therefore defaults `LA_TELEMETRY=0`, which exports:
+
+```text
+CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1   # the umbrella the CLI documents in its own messages
+DISABLE_TELEMETRY=1                          # Statsig
+DISABLE_ERROR_REPORTING=1                    # Sentry
+DISABLE_AUTOUPDATER=1                        # update polling
+```
+
+The umbrella alone is enough on the current build; the three granular vars are set as well so that a
+build which ever narrows the umbrella still gets the specific suppressions instead of quietly
+resuming. The session prints its posture at startup (`🔇 Telemetry: OFF`), because a suppression you
+cannot see is indistinguishable from one that has silently stopped working.
+
+Verified by outcome, not by assumption: with this on, a session that had completed a real turn
+(including a classifier call) held **zero** non-loopback sockets, against two before — while a
+control cloud session measured in the same way still showed three, so the check can still detect
+sockets when they exist. Confirmed from inside the session as well, since `ps eww` truncates the
+environment on macOS and is not evidence either way here.
+
+**What this does not cover.** It silences *Claude Code's* nonessential traffic. It does not touch
+anything **you** have configured: if your `settings.json` runs hooks that call out — this repo's
+maintainer has four `joyia ping` hooks on session/input/task/stop — those still fire, in separate
+short-lived processes, which also means a per-process socket check will not see them. Turning your
+own instrumentation off is your call, not the launcher's.
+
+Trade-off, stated because it is real: the umbrella also disables `/design-sync`, Projects, and the
+CLI's update check. All three are irrelevant to a local session — `DesignSync` is already withheld by
+`LA_DENY_TOOLS`, and backend updates come from the weekly launchd check rather than the CLI's poller.
 
 ### What to expect from a local session
 

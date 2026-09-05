@@ -51,6 +51,31 @@ fi
 if [ "$LA_AUTO_MODE" = "1" ]; then
     : "${LA_HOTSWAP_FORCE_FRESH:=1}"
 fi
+
+# Nonessential outbound traffic. LA_TELEMETRY=0 (the DEFAULT for a local session) suppresses it;
+# set LA_TELEMETRY=1 to keep stock Claude Code behaviour.
+#
+# Why default it off here rather than only in the picker: "local" is the promise this launcher makes,
+# and a session that still reports to Statsig/Sentry and polls for updates is not local, however local
+# the inference is. Measured 2026-09-05 — a session whose every inference request provably went to
+# 127.0.0.1 still held outbound HTTPS sockets to Anthropic (160.79.104.10) and Google/Statsig
+# (34.149.66.165). Neither is the gateway, so neither shows up in cost or routing checks.
+#
+# The umbrella variable is the one the installed build documents in its own refusal messages
+# ("... has been disabled via the CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC environment variable").
+# The three granular ones are set as well, deliberately: they are independently honoured, so a build
+# that ever narrows the umbrella still gets the specific suppressions rather than silently resuming.
+#
+# KNOWN TRADE-OFF, not a bug: the umbrella also disables /design-sync and Projects, and the update
+# check. All three are irrelevant to a local session (DesignSync is already in LA_DENY_TOOLS), and
+# backend updates are handled by the weekly launchd check, not by the CLI's own poller.
+: "${LA_TELEMETRY:=0}"
+if [ "$LA_TELEMETRY" = "0" ]; then
+    export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+    export DISABLE_TELEMETRY=1
+    export DISABLE_ERROR_REPORTING=1
+    export DISABLE_AUTOUPDATER=1
+fi
 if [ -z "$MODEL_ALIAS" ] || ! la_lookup "$MODEL_ALIAS"; then
     la_retired_hint "$MODEL_ALIAS" || true
     echo "Usage: $0 <alias> [effort-override]"; echo "Registered aliases:"; la_aliases_help
@@ -326,6 +351,13 @@ mkdir -p "$HOME/.claude/logs"
 if [ "$LA_AUTO_MODE" = "1" ]; then _LA_MODE="auto"; else _LA_MODE="direct"; fi
 echo "$(date '+%Y-%m-%d %H:%M:%S')  alias=$MODEL_ALIAS  spoof=$MODEL_SPOOF effort=$EFFORT  backend=$BACKEND  declared=$BACKEND_DECLARED  vllm_port=$VLLM_PORT  mode=$_LA_MODE" >> "$HOME/.claude/logs/local-agents-sessions.log"
 echo "🧭 Session engine: $MODEL_ALIAS  (direct; logged to ~/.claude/logs/local-agents-sessions.log)"
+# State the traffic posture out loud. A suppression the user cannot see is indistinguishable from one
+# that silently stopped working, and this one has no other visible symptom.
+if [ "$LA_TELEMETRY" = "0" ]; then
+    echo "🔇 Telemetry: OFF — no nonessential outbound traffic (LA_TELEMETRY=1 restores stock behaviour)"
+else
+    echo "📡 Telemetry: ON — stock Claude Code reporting and update checks are active"
+fi
 
 # Record WHICH transcript this session writes, so watchers never have to guess it.
 # Why the launcher and not the watcher: Claude Code exposes no session id on the process, and it

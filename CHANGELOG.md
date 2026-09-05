@@ -33,8 +33,24 @@ is waiting for a release number does belong here, and is listed below.
   as a fail-closed `temporarily unavailable` refusal. `LA_RAPID_MAX_NUM_SEQS` therefore defaults to
   `2`, and enabling auto mode sets `LA_HOTSWAP_FORCE_FRESH=1` so a server left over from a
   single-slot launch is restarted rather than reused.
-- `tests/test_csl_menu.sh` sections 5–7, covering the auto-mode default, the `CSL_AUTO_MODE=0`
-  opt-out, and the value the launcher actually receives (rather than the menu text that describes it).
+- **Nonessential outbound traffic is off by default for local sessions.** `LA_TELEMETRY=0` (the
+  launcher default, toggled with `t` in `csl` or `CSL_TELEMETRY=1`) exports
+  `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `DISABLE_TELEMETRY`, `DISABLE_ERROR_REPORTING` and
+  `DISABLE_AUTOUPDATER`, and the session prints `🔇 Telemetry: OFF` at startup.
+
+  The reason it is a default rather than an option: routing inference locally does not stop the CLI
+  talking to the internet. Measured — a session whose every request provably went to `127.0.0.1`
+  still held outbound sockets to Anthropic (`160.79.104.10`) and Google/Statsig (`34.149.66.165`),
+  neither of which is inference or the gateway, so neither appears in a cost or routing check.
+  Verified by outcome: zero non-loopback sockets after a real turn, against two before, with a
+  control cloud session still showing three so the check demonstrably still detects them.
+
+  Scope is deliberately limited to Claude Code's own traffic — hooks the *user* has configured still
+  run, in separate processes. Trade-off: the umbrella also disables `/design-sync`, Projects and the
+  CLI update check, all irrelevant to a local session.
+- `tests/test_csl_menu.sh` sections 5–9, covering the auto-mode default, the `CSL_AUTO_MODE=0`
+  opt-out, the telemetry default and its `CSL_TELEMETRY=1` opt-in, both `a`/`t` toggles, and in every
+  case the value the launcher actually receives rather than the menu text that describes it.
 - **Per-model auto-compaction profiles for local sessions.** `config-lib.sh` gained the optional
   associative array `LA_SESSION_AUTO_COMPACT`, keyed by model alias, and `csl` applies the selected
   model's value by exporting `LA_AUTO_COMPACT_WINDOW` into the launcher it execs. The export is

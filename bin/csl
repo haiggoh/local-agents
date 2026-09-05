@@ -61,6 +61,18 @@ _apply_session_profile() {
 # all, so ordinary work is unaffected.
 AUTO_MODE="${CSL_AUTO_MODE:-1}"
 
+# Telemetry state. OFF by default: the point of a local session is that the work stays on this
+# machine, and a session that still reports to Statsig/Sentry and polls for updates is not that.
+# Measured 2026-09-05 on a session whose inference was provably 100% local — it still held two
+# outbound HTTPS sockets, to Anthropic (160.79.104.10) and to Google/Statsig (34.149.66.165). Those
+# are not inference and they are not the gateway, so they are easy to mistake for noise and easy to
+# miss entirely; they are also outbound calls the user never asked for.
+#
+# TELEMETRY=0 (the default) means "no nonessential traffic". Toggle with `t`, or set CSL_TELEMETRY=1
+# to leave the stock behaviour in place. The launcher turns this into the actual env vars, so the
+# same switch works for any caller of launch-claude-agent.sh, not just this picker.
+TELEMETRY="${CSL_TELEMETRY:-0}"
+
 # Argument passthrough still skips the picker and watcher. It now receives the
 # same selected-model profile as an interactive numbered choice.
 if [ "$#" -gt 0 ]; then
@@ -133,7 +145,7 @@ OSA
       echo "👁  watcher (run in another terminal): $WATCHER --attach $$"
     fi
   fi
-  if [ -n "$effort" ]; then exec env LA_AUTO_MODE="$AUTO_MODE" "$LAUNCHER" "$alias" "$effort"; else exec env LA_AUTO_MODE="$AUTO_MODE" "$LAUNCHER" "$alias"; fi
+  if [ -n "$effort" ]; then exec env LA_AUTO_MODE="$AUTO_MODE" LA_TELEMETRY="$TELEMETRY" "$LAUNCHER" "$alias" "$effort"; else exec env LA_AUTO_MODE="$AUTO_MODE" LA_TELEMETRY="$TELEMETRY" "$LAUNCHER" "$alias"; fi
 }
 
 while :; do
@@ -150,6 +162,8 @@ while :; do
   else                        echo "  w) watcher: OFF — no monitor window (toggle)"; fi
   if [ "$AUTO_MODE" = "1" ]; then echo "  a) auto-mode: ON  — classifier judges every consequential Bash call (toggle)"
   else                           echo "  a) auto-mode: OFF — acceptEdits (edits auto-apply, tools prompt) (toggle)"; fi
+  if [ "$TELEMETRY" = "1" ]; then echo "  t) telemetry: ON  — stock Claude Code reporting/update checks (toggle)"
+  else                            echo "  t) telemetry: OFF — no nonessential outbound traffic (toggle)"; fi
   echo "  q) quit"
   echo
   printf "Selection [1]: "; read -r sel; sel="${sel:-1}"
@@ -157,6 +171,7 @@ while :; do
     q|Q) exit 0 ;;
     w|W) if [ "$WATCH" = "1" ]; then WATCH=0; else WATCH=1; fi; continue ;;
     a|A) if [ "$AUTO_MODE" = "1" ]; then AUTO_MODE=0; else AUTO_MODE=1; fi; continue ;;
+    t|T) if [ "$TELEMETRY" = "1" ]; then TELEMETRY=0; else TELEMETRY=1; fi; continue ;;
     c|C)
       echo >&2
       echo "Models (on disk, session-capable):" >&2
