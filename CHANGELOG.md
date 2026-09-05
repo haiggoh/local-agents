@@ -6,6 +6,44 @@ The project began using Git tags after development was already underway and did 
 
 Where no Git tag exists, the release heading links directly to its release commit. Component versions—such as the terminal `local-agent-dispatch` version—remain independent unless explicitly identified as the plugin release version.
 
+## [0.13.8] — 2026-09-05
+
+Merged `feat/auto-mode-classifier-localhost-routing` into main.
+
+### Added
+
+- **Auto Mode with its safety classifier routed to the local backend.** Claude Code judges each
+  consequential tool call with a *separate* classifier, independent of the session model, so on a
+  cloud-routed session a rate-limit or an exhausted budget took Auto Mode away precisely when local
+  work had become the fallback. A local session already points `ANTHROPIC_BASE_URL` at its own
+  server, so the classifier request follows it: `bin/launch-local-auto-mode.sh` warms a server that
+  has a slot free for it and launches into `--permission-mode auto`, and `launch-claude-agent.sh`
+  honours `LA_AUTO_MODE=1` for the same effect on an ordinary launch.
+
+  Verified end-to-end on 2026-09-05: the local server logged
+  `request model='claude-sonnet-5' served by loaded engine='claude-opus-5'` — the classifier's own
+  model identity, answered by the loaded local engine — while the session held no connection to the
+  cloud gateway, and the judged action then executed. Routing is proven; **verdict quality is not**,
+  and a local model is still not Anthropic's classifier.
+
+- **CSL auto-mode toggle.** The picker now shows `a) auto-mode: ON/OFF` and defaults ON — because
+  the classifier is local, auto mode costs nothing and cannot be withdrawn by a cloud 429. Opt out
+  with `CSL_AUTO_MODE=0` or press `a` in the picker.
+
+- **Telemetry suppression default.** Local sessions now ship with `LA_TELEMETRY=0` by default,
+  disabling Statsig/Sentry reporting, update checks, and nonessential outbound traffic. Toggle with
+  `t` in the picker or `CSL_TELEMETRY=1`.
+
+- **`bin/launch-local-auto-mode.sh`** — the dedicated auto-mode launcher that warms a server slot
+  for the classifier before launching the session.
+
+### Changed
+
+- `bin/launch-claude-agent.sh` now honours `LA_AUTO_MODE=1` → `--permission-mode auto` with an
+  appended system prompt reminding the session of its mode.
+- `bin/local-llm-hotswap.sh` and `config/config-lib.sh` updated to support the classifier's
+  `--max-num-seqs=2` slot allocation.
+
 ## [Unreleased]
 
 Planned-but-unshipped *specification* work is tracked in **[`docs/ROADMAP.md`](docs/ROADMAP.md)**,
