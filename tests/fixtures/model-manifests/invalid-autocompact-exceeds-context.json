@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "artifact": { "kind": "model", "launchable": true, "session_eligible": true, "directory_name": "Model-131k", "format": "mlx" },
+  "capabilities": { "native_context_tokens": 131072, "configured_context_tokens": 131072, "context_floor_100k_tokens": 100000, "claude_autocompact_tokens": 200000 },
+  "acquisition": { "status": "complete" }
+}

@@ -1,0 +1,621 @@
+schema_version: 2
+
+autocompaction_policy:
+  minimum_tokens: 100000
+  increment_tokens: 100000
+  maximum_tokens: 1000000
+  calculation: >-
+    min(1000000, floor(context_window_tokens / 100000) * 100000)
+  applicability: >-
+    Apply only to standalone Claude Code session models with a context
+    window of at least 100000 tokens.
+  runtime_note: >-
+    The live server must be configured to provide at least the selected
+    autocompaction value. If the runtime context is lower, lower the
+    catalogue context and recalculate before starting Claude Code.
+
+entries:
+
+  # 1
+  - folder: ".DS_Store"
+    entry_type: filesystem_metadata
+    session_model: false
+    catalogue_action: exclude
+    context_window_tokens: null
+    autocompaction_tokens: null
+    reason: "macOS metadata file"
+
+  # 2
+  - folder: "gemma-4-31B-it-OptiQ-4bit"
+    entry_type: standalone_model
+    session_model: true
+    model_family: "Gemma 4 31B IT"
+    base_model: "google/gemma-4-31B-it"
+    format: "MLX OptiQ mixed 4/8-bit"
+    modalities: [text, image]
+    context_window_tokens: 262144
+    autocompaction_tokens: 200000
+    confidence: high
+    notes: "Text context is 262144; separate vision configuration is 131072."
+
+  # 3
+  - folder: "Muse-Glimmer-30B-4bit"
+    entry_type: standalone_model
+    session_model: true
+    model_family: "Muse Glimmer 30B"
+    base_model: "meta-models/Muse-Glimmer-30B"
+    format: "4-bit"
+    modalities: [text, image]
+    context_window_tokens: 131072
+    autocompaction_tokens: 100000
+    confidence: high
+    notes: "Use 131072 as the concrete catalogue limit for the advertised 131K+ window."
+
+  # 4
+  - folder: "Ornith-1.5-35B-A3B-MLX-4bit"
+    entry_type: standalone_model
+    session_model: true
+    model_family: "Ornith 1.5 35B-A3B"
+    base_model: "ornith-ai/Ornith-1.5-35B-A3B"
+    format: "MLX 4-bit"
+    modalities: [text]
+    context_window_tokens: 262144
+    extended_context_tokens: 1000000
+    autocompaction_tokens: 200000
+    extended_autocompaction_tokens: 1000000
+    confidence: high
+    notes: "The 1M mode requires explicit YaRN factor 4 and matching runtime configuration."
+
+  # 5
+  - folder: "_override_gemma-4-26b-a4b-it-MLX-8bit"
+    entry_type: override_alias
+    session_model: false
+    catalogue_action: alias
+    alias_target: "gemma-4-26b-a4b-it-MLX-8bit"
+    model_family: "Gemma 4 26B-A4B IT"
+    base_model: "google/gemma-4-26B-A4B-it"
+    format: "MLX 8-bit"
+    context_window_tokens: 262144
+    autocompaction_tokens: null
+    inherited_autocompaction_tokens: 200000
+    confidence: high
+    notes: "Retain only if the plugin uses this path as an explicit runtime override."
+
+  # 6
+  - folder: "agents-a1-kimi-bf16"
+    entry_type: standalone_model
+    session_model: true
+    model_family: "Agents-A1-4B Kimi coding derivative"
+    base_model: "InternScience/Agents-A1-4B"
+    format: "BF16"
+    modalities: [text]
+    context_window_tokens: 262144
+    autocompaction_tokens: 200000
+    confidence: high
+    notes: "Fine-tuned on Kimi K3 coding and debugging traces."
+
+  # 7
+  - folder: "chatterbox-turbo-8bit"
+    entry_type: tts_model
+    session_model: false
+    catalogue_action: exclude_from_claude_sessions
+    base_model: "ResembleAI/chatterbox-turbo"
+    format: "MLX 8-bit"
+    modalities: [text, audio]
+    context_window_tokens: null
+    autocompaction_tokens: null
+    specialist_input_limit: 1024
+    reason: "Text-to-speech model; its tokenizer limit is not a Claude Code context window."
+
+  # 8
+  - folder: "depthart-typegpu-all"
+    entry_type: depth_estimation_model
+    session_model: false
+    catalogue_action: exclude_from_claude_sessions
+    base_model: "Fengxue93/DepthART"
+    format: "TypeGPU depthart bundles"
+    modalities: [image]
+    context_window_tokens: null
+    autocompaction_tokens: null
+    reason: "Depth-estimation asset, not a language model."
+
+  # 9
+  - folder: "devstral-small2-uniform4"
+    entry_type: standalone_model
+    session_model: true
+    model_family: "Devstral Small 2 24B Instruct 2512"
+    base_model: "mistralai/Devstral-Small-2-24B-Instruct-2512"
+    format: "MLX uniform 4-bit"
+    modalities: [text, image]
+    context_window_tokens: 393216
+    published_context_tokens: 262144
+    autocompaction_tokens: 300000
+    confidence: high
+    notes: >-
+      Exact local config and params.json declare 393216 with YaRN.
+      The runtime must serve at least 300000 tokens for this setting.
+
+  # 10
+  - folder: "gemma-4-26b-a4b-it-MLX-8bit"
+    entry_type: standalone_model
+    session_model: true
+    model_family: "Gemma 4 26B-A4B IT"
+    base_model: "google/gemma-4-26B-A4B-it"
+    format: "MLX 8-bit"
+    modalities: [text, image]
+    context_window_tokens: 262144
+    autocompaction_tokens: 200000
+    confidence: high
+    notes: "Text context is 262144; separate vision configuration is 131072."
+
+  # 11
+  - folder: "gemma4-12b-frontierdistill"
+    entry_type: standalone_model
+    session_model: true
+    model_family: "Gemma 4 12B Frontier Distill"
+    base_model: "mlx-community/gemma-4-12B-it-qat-4bit"
+    format: "MLX QAT 4-bit with fused rank-8 adapter"
+    modalities: [text, image, audio]
+    context_window_tokens: 262144
+    autocompaction_tokens: 200000
+    confidence: high
+    notes: "Agentic coding and tool-use derivative; adapter is already fused."
+
+  # 12
+  - folder: "granite-4.0-h-tiny-6bit-MLX"
+    entry_type: standalone_model
+    session_model: true
+    model_family: "IBM Granite 4.0 H Tiny"
+    base_model: "ibm-granite/granite-4.0-h-tiny"
+    format: "MLX 6-bit"
+    modalities: [text]
+    context_window_tokens: 131072
+    autocompaction_tokens: 100000
+    confidence: high
+
+  # 13
+  - folder: "kat-v2.5-6bit-xl"
+    entry_type: standalone_model
+    session_model: true
+    model_family: "KAT-Coder V2.5 Dev"
+    base_model: "Kwaipilot/KAT-Coder-V2.5-Dev"
+    format: "MLX mixed 6-bit XL"
+    modalities: [text]
+    context_window_tokens: 262144
+    extended_context_tokens: 1000000
+    autocompaction_tokens: 200000
+    extended_autocompaction_tokens: 1000000
+    confidence: high
+    notes: "Extended mode requires explicit YaRN and runtime validation."
+
+  # 14
+  - folder: "kat-v2.5-oq6e"
+    entry_type: standalone_model
+    session_model: true
+    model_family: "KAT-Coder V2.5 Dev"
+    base_model: "Kwaipilot/KAT-Coder-V2.5-Dev"
+    format: "MLX oQ6e"
+    modalities: [text]
+    context_window_tokens: 262144
+    extended_context_tokens: 1000000
+    autocompaction_tokens: 200000
+    extended_autocompaction_tokens: 1000000
+    confidence: high
+
+  # 15
+  - folder: "kat-v2.5-oq8e"
+    entry_type: standalone_model
+    session_model: true
+    model_family: "KAT-Coder V2.5 Dev"
+    base_model: "Kwaipilot/KAT-Coder-V2.5-Dev"
+    format: "MLX oQ8e"
+    modalities: [text]
+    context_window_tokens: 262144
+    extended_context_tokens: 1000000
+    autocompaction_tokens: 200000
+    extended_autocompaction_tokens: 1000000
+    confidence: high
+
+  # 16
+  - folder: "Kimi-VL-A3B-Thinking-2506-6bit"
+    entry_type: standalone_model
+    session_model: true
+    model_family: "Kimi-VL A3B Thinking 2506"
+    base_model: "moonshotai/Kimi-VL-A3B-Thinking-2506"
+    format: "MLX 6-bit"
+    modalities: [text, image, video]
+    context_window_tokens: 131072
+    autocompaction_tokens: 100000
+    confidence: high
+    notes: "Use the language-model context, not the tokenizer's larger sentinel value."
+
+  # 17
+  - folder: "Kimi-VL-A3B-Thinking-2506-8bit"
+    entry_type: standalone_model
+    session_model: true
+    model_family: "Kimi-VL A3B Thinking 2506"
+    base_model: "moonshotai/Kimi-VL-A3B-Thinking-2506"
+    format: "MLX 8-bit"
+    modalities: [text, image, video]
+    context_window_tokens: 131072
+    autocompaction_tokens: 100000
+    confidence: high
+
+  # 18
+  - folder: "Kokoro-82M-bf16"
+    entry_type: tts_model
+    session_model: false
+    catalogue_action: exclude_from_claude_sessions
+    base_model: "hexgrad/Kokoro-82M"
+    format: "BF16"
+    modalities: [text, audio]
+    context_window_tokens: null
+    autocompaction_tokens: null
+    specialist_input_limit: 512
+    reason: "TTS phoneme limit, not conversational context."
+
+  # 19
+  - folder: "laguna-s2.1-oq4e-fast"
+    entry_type: standalone_model
+    session_model: true
+    model_family: "Laguna S 2.1"
+    base_model: "poolside/Laguna-S-2.1"
+    format: "MLX oQ4e fast"
+    modalities: [text]
+    context_window_tokens: 1048576
+    autocompaction_tokens: 1000000
+    confidence: high
+    notes: >-
+      Use the 1M setting only when the running oMLX server exposes at
+      least 1000000 tokens.
+
+  # 20
+  - folder: "ministral14-reasoning-8bit"
+    entry_type: standalone_model
+    session_model: true
+    model_family: "Ministral 3 14B Reasoning 2512"
+    base_model: "mistralai/Ministral-3-14B-Reasoning-2512"
+    format: "MLX 8-bit"
+    modalities: [text, image]
+    context_window_tokens: 262144
+    autocompaction_tokens: 200000
+    confidence: high
+
+  # 21
+  - folder: "mistral-small4-q4q5"
+    entry_type: standalone_model
+    session_model: true
+    model_family: "Mistral Small 4 119B"
+    base_model: "mistralai/Mistral-Small-4-119B-2603"
+    format: "mixed Q4/Q5"
+    modalities: [text, image]
+    context_window_tokens: 262144
+    autocompaction_tokens: 200000
+    confidence: high
+
+  # 22
+  - folder: "nemotron-omni-4bit"
+    entry_type: standalone_model
+    session_model: true
+    model_family: "Nemotron 3 Nano Omni 30B-A3B Reasoning"
+    base_model: "nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-BF16"
+    format: "MLX 4-bit"
+    modalities: [text, image, video, audio]
+    context_window_tokens: 262144
+    multimodal_processor_limit: 16384
+    autocompaction_tokens: 200000
+    confidence: high
+    notes: "The 16384 processor setting is not the text decoder's total context."
+
+  # 23
+  - folder: "nemotron-omni-6bit"
+    entry_type: standalone_model
+    session_model: true
+    model_family: "Nemotron 3 Nano Omni 30B-A3B Reasoning"
+    base_model: "nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-BF16"
+    format: "MLX 6-bit"
+    modalities: [text, image, video, audio]
+    context_window_tokens: 262144
+    multimodal_processor_limit: 16384
+    autocompaction_tokens: 200000
+    confidence: high
+
+  # 24
+  - folder: "nemotron-omni-8bit"
+    entry_type: standalone_model
+    session_model: true
+    model_family: "Nemotron 3 Nano Omni 30B-A3B Reasoning"
+    base_model: "nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-BF16"
+    format: "MLX 8-bit"
+    modalities: [text, image, video, audio]
+    context_window_tokens: 262144
+    multimodal_processor_limit: 16384
+    autocompaction_tokens: 200000
+    confidence: high
+
+  # 25
+  - folder: "NVIDIA-Nemotron-3-Nano-30B-A3B-MLX-4Bit"
+    entry_type: standalone_model
+    session_model: true
+    model_family: "NVIDIA Nemotron 3 Nano 30B-A3B"
+    base_model: "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16"
+    format: "MLX 4-bit"
+    modalities: [text]
+    context_window_tokens: 262144
+    extended_context_tokens: 1048576
+    autocompaction_tokens: 200000
+    extended_autocompaction_tokens: 1000000
+    confidence: high
+    notes: "The local model config defaults to 262144."
+
+  # 26
+  - folder: "NVIDIA-Nemotron-3-Nano-30B-A3B-MLX-6Bit"
+    entry_type: standalone_model
+    session_model: true
+    model_family: "NVIDIA Nemotron 3 Nano 30B-A3B"
+    base_model: "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16"
+    format: "MLX 6-bit"
+    modalities: [text]
+    context_window_tokens: 262144
+    extended_context_tokens: 1048576
+    autocompaction_tokens: 200000
+    extended_autocompaction_tokens: 1000000
+    confidence: high
+
+  # 27
+  - folder: "NVIDIA-Nemotron-3-Nano-30B-A3B-MLX-8Bit"
+    entry_type: standalone_model
+    session_model: true
+    model_family: "NVIDIA Nemotron 3 Nano 30B-A3B"
+    base_model: "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16"
+    format: "MLX 8-bit"
+    modalities: [text]
+    context_window_tokens: 262144
+    extended_context_tokens: 1048576
+    autocompaction_tokens: 200000
+    extended_autocompaction_tokens: 1000000
+    confidence: high
+
+  # 28
+  - folder: "qwen-agentworld-4bit"
+    entry_type: standalone_model
+    session_model: true
+    model_family: "Qwen AgentWorld 35B-A3B"
+    base_model: "Qwen/Qwen-AgentWorld-35B-A3B"
+    format: "MLX uniform 4-bit"
+    modalities: [text]
+    context_window_tokens: 262144
+    tokenizer_declared_context_tokens: 131072
+    autocompaction_tokens: 200000
+    confidence: high
+    notes: >-
+      Model architecture declares 262144. Confirm that the serving stack
+      does not enforce the tokenizer's 131072 value.
+
+  # 29
+  - folder: "Qwen3-TTS-12Hz-0.6B-CustomVoice-8bit"
+    entry_type: tts_model
+    session_model: false
+    catalogue_action: exclude_from_claude_sessions
+    base_model: "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice"
+    format: "MLX Audio 8-bit"
+    modalities: [text, audio]
+    context_window_tokens: null
+    autocompaction_tokens: null
+    talker_position_limit: 32768
+    code_predictor_position_limit: 65536
+    reason: "Specialized speech-generation model."
+
+  # 30
+  - folder: "Qwen3-TTS-12Hz-1.7B-CustomVoice-bf16"
+    entry_type: tts_model
+    session_model: false
+    catalogue_action: exclude_from_claude_sessions
+    base_model: "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
+    format: "MLX Audio BF16"
+    modalities: [text, audio]
+    context_window_tokens: null
+    autocompaction_tokens: null
+    talker_position_limit: 32768
+    code_predictor_position_limit: 65536
+    reason: "Specialized speech-generation model."
+
+  # 31
+  - folder: "qwen3.6-27b-bf16"
+    entry_type: standalone_model
+    session_model: true
+    model_family: "Qwen3.6 27B"
+    base_model: "Qwen/Qwen3.6-27B"
+    format: "MLX BF16"
+    modalities: [text, image, video]
+    context_window_tokens: 262144
+    extended_context_tokens: 1010000
+    autocompaction_tokens: 200000
+    extended_autocompaction_tokens: 1000000
+    confidence: high
+
+  # 32
+  - folder: "Qwen3.8-27B-4bit"
+    entry_type: standalone_model
+    session_model: true
+    model_family: "Qwen3.8 27B"
+    base_model: "Qwen/Qwen3.8-27B"
+    format: "MLX 4-bit"
+    modalities: [text, image, video]
+    context_window_tokens: 262144
+    extended_context_tokens: 1000000
+    autocompaction_tokens: 200000
+    extended_autocompaction_tokens: 1000000
+    compatible_drafter: "Qwen3.8-27B-MTP-4bit"
+    confidence: high
+
+  # 33
+  - folder: "Qwen3.8-27B-8bit"
+    entry_type: standalone_model
+    session_model: true
+    model_family: "Qwen3.8 27B"
+    base_model: "Qwen/Qwen3.8-27B"
+    format: "MLX 8-bit"
+    modalities: [text, image, video]
+    context_window_tokens: 262144
+    extended_context_tokens: 1000000
+    autocompaction_tokens: 200000
+    extended_autocompaction_tokens: 1000000
+    compatible_drafter: "Qwen3.8-27B-MTP-8bit"
+    confidence: high
+
+  # 34
+  - folder: "Qwen3.8-27B-MTP-4bit"
+    entry_type: speculative_drafter
+    session_model: false
+    catalogue_action: attach_to_target
+    target_model: "Qwen3.8-27B-4bit"
+    model_type: "qwen3_5_mtp"
+    format: "MLX 4-bit"
+    context_compatibility_tokens: 262144
+    context_window_tokens: null
+    autocompaction_tokens: null
+    confidence: high
+    reason: "Drafter-only checkpoint; approximately 228 MiB, not a standalone model."
+
+  # 35
+  - folder: "Qwen3.8-27B-MTP-8bit"
+    entry_type: speculative_drafter
+    session_model: false
+    catalogue_action: attach_to_target
+    target_model: "Qwen3.8-27B-8bit"
+    model_type: "qwen3_5_mtp"
+    format: "MLX 8-bit"
+    context_compatibility_tokens: 262144
+    context_window_tokens: null
+    autocompaction_tokens: null
+    confidence: high
+    reason: "Drafter-only checkpoint; approximately 430 MiB, not a standalone model."
+
+  # 36
+  - folder: "Qwen3.8-27B-oQ6"
+    entry_type: standalone_model
+    session_model: true
+    model_family: "Qwen3.8 27B"
+    base_model: "Qwen/Qwen3.8-27B"
+    format: "MLX oQ6"
+    modalities: [text, image, video]
+    context_window_tokens: 262144
+    extended_context_tokens: 1000000
+    autocompaction_tokens: 200000
+    extended_autocompaction_tokens: 1000000
+    confidence: high
+
+  # 37
+  - folder: "DeepSeek-R1-Distill-Qwen-32B-4bit"
+    entry_type: standalone_model
+    session_model: true
+    model_family: "DeepSeek R1 Distill Qwen 32B"
+    base_model: "deepseek-ai/DeepSeek-R1-Distill-Qwen-32B"
+    format: "MLX 4-bit"
+    modalities: [text]
+    context_window_tokens: 131072
+    tokenizer_declared_context_tokens: 16384
+    autocompaction_tokens: 100000
+    confidence: high
+    notes: "The model config governs; the tokenizer value is stale or restrictive metadata."
+
+  # 38
+  - folder: "Devstral-2-123B-Instruct-2512-4bit"
+    entry_type: standalone_model
+    session_model: true
+    model_family: "Devstral 2 123B Instruct 2512"
+    base_model: "mistralai/Devstral-2-123B-Instruct-2512"
+    format: "MLX 4-bit"
+    modalities: [text]
+    context_window_tokens: 262144
+    autocompaction_tokens: 200000
+    confidence: high
+
+  # 39
+  - folder: "devstral-24b-gguf"
+    entry_type: standalone_model
+    session_model: true
+    model_family: "Devstral Small 24B 2505"
+    base_model: "mistralai/Devstral-Small-2505"
+    format: "GGUF Q4_K_M"
+    modalities: [text]
+    context_window_tokens: 131072
+    autocompaction_tokens: 100000
+    confidence: medium
+    notes: >-
+      Identification is based on the original devstralQ4_K_M filename and
+      download lineage. It is not Devstral Small 2.
+
+  # 40
+  - folder: "KAT-Coder-V2.5-Dev-OptiQ-4bit"
+    entry_type: standalone_model
+    session_model: true
+    model_family: "KAT-Coder V2.5 Dev"
+    base_model: "Kwaipilot/KAT-Coder-V2.5-Dev"
+    format: "MLX OptiQ mixed 4/8-bit"
+    modalities: [text]
+    context_window_tokens: 262144
+    extended_context_tokens: 1000000
+    autocompaction_tokens: 200000
+    extended_autocompaction_tokens: 1000000
+    confidence: high
+
+  # 41
+  - folder: "Llama-4-Scout-17B-16E-Instruct-4bit"
+    entry_type: standalone_model
+    session_model: true
+    model_family: "Llama 4 Scout 17B-16E Instruct"
+    base_model: "meta-llama/Llama-4-Scout-17B-16E-Instruct"
+    format: "4-bit"
+    modalities: [text, image]
+    context_window_tokens: 10485760
+    autocompaction_tokens: 1000000
+    confidence: high
+    notes: >-
+      Claude Code caps autocompaction at 1M. The inference server must
+      always be launched with an explicit bounded context allocation.
+
+  # 42
+  - folder: "qwen3-next-80b-thinking-mlx"
+    entry_type: standalone_model
+    session_model: true
+    model_family: "Qwen3-Next 80B-A3B Thinking"
+    base_model: "Qwen/Qwen3-Next-80B-A3B-Thinking"
+    format: "MLX 4-bit"
+    modalities: [text]
+    context_window_tokens: 262144
+    extended_context_tokens: 1010000
+    tokenizer_declared_context_tokens: 1010000
+    autocompaction_tokens: 200000
+    extended_autocompaction_tokens: 1000000
+    confidence: high
+    notes: "Native language-model config is 262144; larger mode requires explicit scaling."
+
+  # 43
+  - folder: "Qwen3.6-27B-8bit"
+    entry_type: standalone_model
+    session_model: true
+    model_family: "Qwen3.6 27B"
+    base_model: "Qwen/Qwen3.6-27B"
+    format: "MLX 8-bit"
+    modalities: [text, image, video]
+    context_window_tokens: 262144
+    extended_context_tokens: 1010000
+    autocompaction_tokens: 200000
+    extended_autocompaction_tokens: 1000000
+    confidence: high
+
+  # 44
+  - folder: "Qwen3.6-27B-UD-MLX-4bit"
+    entry_type: standalone_model
+    session_model: true
+    model_family: "Qwen3.6 27B"
+    base_model: "Qwen/Qwen3.6-27B"
+    format: "MLX Unsloth Dynamic 4-bit"
+    modalities: [text, image, video]
+    context_window_tokens: 262144
+    extended_context_tokens: 1010000
+    autocompaction_tokens: 200000
+    extended_autocompaction_tokens: 1000000
+    confidence: high

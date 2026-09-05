@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "artifact": { "kind": "model", "launchable": true, "session_eligible": true, "directory_name": "Model-4bit", "format": "mlx" },
+  "capabilities": { "native_context_tokens": 262144, "configured_context_tokens": 262144, "context_floor_100k_tokens": 200000, "claude_autocompact_tokens": 250000 },
+  "acquisition": { "status": "complete" }
+}

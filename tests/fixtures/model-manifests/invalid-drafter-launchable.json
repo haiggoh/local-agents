@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "artifact": { "kind": "draft_model", "launchable": true, "session_eligible": false, "directory_name": "Qwen3.8-27B-MTP-4bit", "format": "mlx", "target_directory_name": "Qwen3.8-27B-4bit" },
+  "acquisition": { "status": "complete" }
+}

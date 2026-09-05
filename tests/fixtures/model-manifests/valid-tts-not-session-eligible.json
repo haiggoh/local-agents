@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "artifact": {
+    "kind": "tts_model",
+    "launchable": true,
+    "session_eligible": false,
+    "directory_name": "Kokoro-82M",
+    "format": "safetensors",
+    "source": { "provider": "huggingface", "repository": "hexgrad/Kokoro-82M" },
+    "payload_bytes": 327155712
+  },
+  "capabilities": { "modalities": ["audio"] },
+  "acquisition": { "status": "complete", "producer": { "name": "local-agents", "version": "0.13.7" } }
+}

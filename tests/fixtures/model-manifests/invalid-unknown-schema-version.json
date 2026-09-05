@@ -1,0 +1,5 @@
+{
+  "schema_version": 99,
+  "artifact": { "kind": "model", "launchable": true, "session_eligible": true, "directory_name": "Model-4bit", "format": "mlx" },
+  "acquisition": { "status": "complete" }
+}

@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "artifact": {
+    "kind": "model",
+    "launchable": true,
+    "session_eligible": true,
+    "directory_name": "gemma-4-31B-it-OptiQ-4bit",
+    "format": "mlx",
+    "source": { "provider": "huggingface", "repository": "mlx-community/gemma-4-31B-it-OptiQ-4bit" },
+    "payload_bytes": 25232932864
+  },
+  "capabilities": {
+    "native_context_tokens": 262144,
+    "configured_context_tokens": 262144,
+    "context_source": { "file": "config.json", "json_pointer": "/text_config/max_position_embeddings" },
+    "context_candidates": [
+      { "file": "config.json", "json_pointer": "/text_config/max_position_embeddings", "value": 262144 },
+      { "file": "config.json", "json_pointer": "/vision_config/max_position_embeddings", "value": 131072, "rejected_because": "vision tower limit, not conversational text context" }
+    ],
+    "context_conflict_resolution": {
+      "chosen_value": 262144,
+      "reason": "Text context governs a Claude Code session; the 131072 value is the vision configuration and is not a conversational limit.",
+      "reviewed_on": "2026-09-05"
+    },
+    "modalities": ["text", "image"],
+    "context_floor_100k_tokens": 200000,
+    "claude_autocompact_tokens": 200000
+  },
+  "acquisition": { "status": "complete", "producer": { "name": "local-agents", "version": "0.13.7" } }
+}

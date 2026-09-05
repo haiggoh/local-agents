@@ -15,6 +15,35 @@ is waiting for a release number does belong here, and is listed below.
 
 ### Added
 
+- **Portable local-model manifest v1 — specification, schema and fixtures.**
+  `docs/model-manifest-v1.md` plus `docs/schema/local-model-manifest-v1.schema.json` define a
+  `.local-model-manifest.json` carried BESIDE each artifact's weights, so `~/.models` describes
+  itself and a second consumer can read it without a `local-agents` checkout.
+
+  Three rules the schema enforces rather than merely documents: a manifest is **untrusted data**
+  (strict JSON, never sourced or executed); it stores `directory_name` and **never an absolute path**,
+  so it survives another machine or user; and *declaration is not qualification* — architectural
+  maximum, this artifact's configured limit, an opt-in extended mode, a measured safe limit and the
+  live server's allocation are five separate fields, because collapsing them into one
+  `context_length` is the actual bug this prevents. Artifact `kind`, `launchable` and
+  `session_eligible` are likewise three fields: a speculative drafter is real but never launchable, a
+  TTS asset is launchable but never a session model, and an `mlx_lm`-served model is fine for dispatch
+  yet has no `/v1/messages` surface.
+
+  The 100K autocompaction floor and Claude's 1M cap are **derived**, never independently maintained,
+  and a validator must recompute and compare rather than trust a stored value.
+
+  `config/model-catalogue-context-list.yaml` (44 reviewed entries) is now tracked as **input and
+  provenance only** — explicitly not a second editable source of truth. The two raw audit dumps it
+  was distilled from are gitignored as audit output.
+
+  Deliberately inert: nothing in this slice reads or writes anything under `~/.models`. The writer,
+  validator, downloader integration, CSL wiring and the gated 44-entry backfill are later steps.
+- `tests/test_model_manifest_fixtures.py` — 17 fixtures and 43 stdlib-only assertions, including the
+  published autocompaction table and a check that each invalid fixture fails for its **own** declared
+  reason (a fixture that fails for the wrong reason is not evidence). Stdlib-only because the spec
+  requires runtime handling to be, and because `jsonschema` is not installed here; the schema itself
+  is for interoperability.
 - **Per-model auto-compaction profiles for local sessions.** `config-lib.sh` gained the optional
   associative array `LA_SESSION_AUTO_COMPACT`, keyed by model alias, and `csl` applies the selected
   model's value by exporting `LA_AUTO_COMPACT_WINDOW` into the launcher it execs. The export is

@@ -13,3 +13,9 @@ __pycache__/
 .DS_Store
 .pytest_cache/
 backups/
+
+# Local model audit dumps. These are AUDIT OUTPUT, not source: plan §16 excludes audit output from
+# staged paths, and one of them is ~1.5MB of raw scan. The reviewed catalogue distilled from them
+# (config/model-catalogue-context-list.yaml) IS tracked; the raw dumps are not.
+config/local-model-audit-condensed.txt
+config/local-model-autit-check.txt

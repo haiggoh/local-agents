@@ -1,0 +1,267 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/haiggoh/local-agents/docs/schema/local-model-manifest-v1.schema.json",
+  "title": "Portable local-model manifest, version 1",
+  "description": "Data-only metadata written BESIDE a model's weights as .local-model-manifest.json. Consumers MUST treat an instance as untrusted data: parse it as strict JSON, never source, import, evaluate or execute it. See docs/model-manifest-v1.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "artifact", "acquisition"],
+  "properties": {
+    "schema_version": {
+      "description": "Exactly 1 for this schema. A consumer that does not recognise the value MUST refuse the file rather than guess at its shape.",
+      "type": "integer",
+      "const": 1
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "launchable", "directory_name", "format"],
+      "properties": {
+        "kind": {
+          "description": "What the artifact IS. Independent of whether it can be launched.",
+          "type": "string",
+          "enum": [
+            "model",
+            "draft_model",
+            "adapter",
+            "processor",
+            "gguf_bundle",
+            "tts_model",
+            "depth_estimation_model",
+            "other"
+          ]
+        },
+        "launchable": {
+          "description": "Whether this artifact can be served as an independent endpoint. Deliberately separate from kind: a draft_model is a real artifact that must never be launched on its own, and a tts_model may be launchable while still not being a Claude Code session model.",
+          "type": "boolean"
+        },
+        "session_eligible": {
+          "description": "Whether this artifact may be offered as a Claude Code SESSION model. Narrower than launchable: an mlx_lm-served text model is launchable for dispatch yet has no Anthropic /v1/messages surface, so it cannot drive a session.",
+          "type": "boolean"
+        },
+        "directory_name": {
+          "description": "The artifact's own directory name, NEVER an absolute path. Consumers derive the path from the directory they are scanning, which is what makes the manifest portable across machines and users.",
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[^/\\\\]+$"
+        },
+        "format": {
+          "type": "string",
+          "enum": ["mlx", "gguf", "safetensors", "other"]
+        },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["provider"],
+          "properties": {
+            "provider": { "type": "string", "enum": ["huggingface", "local", "other"] },
+            "repository": { "type": "string" },
+            "revision": {
+              "description": "The PINNED revision actually acquired. A branch name is not a revision.",
+              "type": "string"
+            }
+          }
+        },
+        "payload_bytes": {
+          "description": "Measured on disk, never estimated. 0 is only valid for a non-payload entry.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "target_directory_name": {
+          "description": "REQUIRED when kind is draft_model: the directory_name of the target model this drafter speculates for. Validation must confirm the target exists and is compatible.",
+          "type": "string",
+          "pattern": "^[^/\\\\]+$"
+        },
+        "alias_of_directory_name": {
+          "description": "For an override/alias entry that resolves to another installed artifact. Context is inherited from the target unless explicitly restated.",
+          "type": "string",
+          "pattern": "^[^/\\\\]+$"
+        }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "native_context_tokens": { "$ref": "#/$defs/contextTokens" },
+        "configured_context_tokens": { "$ref": "#/$defs/contextTokens" },
+        "extended_context_tokens": {
+          "description": "Only reachable with an explicit, runtime-supported RoPE/YaRN configuration. Never enabled automatically, and never a substitute for a smaller live server limit.",
+          "$ref": "#/$defs/contextTokens"
+        },
+        "context_source": {
+          "description": "Where the winning value was read from, so a reviewer can re-derive it.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["file", "json_pointer"],
+          "properties": {
+            "file": { "type": "string" },
+            "json_pointer": { "type": "string" }
+          }
+        },
+        "context_candidates": {
+          "description": "EVERY plausible value discovered, retained even when they disagree. A conflict is resolved explicitly and with a reason, never by silently taking the largest.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["file", "json_pointer", "value"],
+            "properties": {
+              "file": { "type": "string" },
+              "json_pointer": { "type": "string" },
+              "value": { "type": "integer" },
+              "rejected_because": { "type": "string" }
+            }
+          }
+        },
+        "context_conflict_resolution": {
+          "description": "REQUIRED when context_candidates disagree: which candidate won and why. Absent it, a validator must fail closed.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["chosen_value", "reason"],
+          "properties": {
+            "chosen_value": { "type": "integer" },
+            "reason": { "type": "string", "minLength": 1 },
+            "reviewed_by": { "type": "string" },
+            "reviewed_on": { "type": "string", "format": "date" }
+          }
+        },
+        "modalities": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["text", "image", "audio", "video"] },
+          "uniqueItems": true
+        },
+        "context_floor_100k_tokens": {
+          "description": "DERIVED, not independently maintained: (effective_context_tokens // 100000) * 100000. Persisted only for portability; a validator MUST recompute and compare.",
+          "type": "integer",
+          "minimum": 0,
+          "multipleOf": 100000
+        },
+        "claude_autocompact_tokens": {
+          "description": "DERIVED: null when the 100K floor is below 100000, otherwise min(1000000, floor). Claude Code accepts autocompaction only in 100000-token increments, minimum 100000, maximum 1000000.",
+          "type": ["integer", "null"],
+          "minimum": 100000,
+          "maximum": 1000000,
+          "multipleOf": 100000
+        }
+      }
+    },
+    "profiles": {
+      "description": "One entry per ALIAS that shares this one physical directory. Aliases are grouped here rather than duplicated as separate artifact records.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["alias", "backend"],
+        "properties": {
+          "alias": { "type": "string", "minLength": 1 },
+          "backend": { "type": "string", "enum": ["rapid", "vllm", "mlx_lm", "llama_cpp"] },
+          "thinking": { "type": "boolean" },
+          "tool_parser": { "type": ["string", "null"] },
+          "reasoning_parser": { "type": ["string", "null"] },
+          "effort": { "type": "string", "enum": ["low", "medium", "high", "xhigh", "max"] },
+          "qualification": {
+            "description": "tested = exercised on this machine with recorded evidence. untested = registered but unqualified. Never infer tested from a successful launch alone.",
+            "type": "string",
+            "enum": ["tested", "untested", "retired"]
+          }
+        }
+      }
+    },
+    "runtime_qualification": {
+      "description": "What was actually MEASURED, as opposed to what the architecture declares. An architectural maximum is not a tested safe limit.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tested_safe_context_tokens": { "type": ["integer", "null"], "minimum": 1024 },
+        "server_context_tokens": {
+          "description": "What the LIVE server was actually allocated. A theoretical extended context must never override a smaller value here.",
+          "type": ["integer", "null"],
+          "minimum": 1024
+        },
+        "runtime": { "type": ["string", "null"] },
+        "quantization": { "type": ["string", "null"] },
+        "hardware": { "type": ["string", "null"] },
+        "co_resident_models": { "type": "array", "items": { "type": "string" } },
+        "test_date": { "type": ["string", "null"], "format": "date" },
+        "evidence": {
+          "description": "How the value was established, in enough detail to re-run. A number with no evidence is a guess.",
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "acquisition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": {
+          "description": "complete ONLY after payload verification. A metadata-only shell must never claim complete.",
+          "type": "string",
+          "enum": ["complete", "partial", "metadata_only"]
+        },
+        "completed_on": { "type": "string", "format": "date" },
+        "producer": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": { "type": "string" },
+            "version": { "type": "string" }
+          }
+        },
+        "catalogue_provenance": {
+          "description": "When a reviewed catalogue seeded any field, name it here so the manifest is not mistaken for pure artifact evidence.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "file": { "type": "string" },
+            "schema_version": { "type": "integer" },
+            "reviewed_on": { "type": "string", "format": "date" }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "contextTokens": {
+      "description": "A plausible context length. The lower bound rejects nonsense; the upper bound is set by the largest audited artifact (Llama 4 Scout, 10485760) and must not be tightened below it. Tokenizer sentinel values are rejected by the extractor even when numerically inside this range.",
+      "type": ["integer", "null"],
+      "minimum": 1024,
+      "maximum": 10485760
+    }
+  },
+  "allOf": [
+    {
+      "$comment": "A draft_model must name its target and must not be independently launchable.",
+      "if": {
+        "properties": { "artifact": { "properties": { "kind": { "const": "draft_model" } }, "required": ["kind"] } },
+        "required": ["artifact"]
+      },
+      "then": {
+        "properties": {
+          "artifact": {
+            "required": ["target_directory_name"],
+            "properties": { "launchable": { "const": false } }
+          }
+        }
+      }
+    },
+    {
+      "$comment": "Non-model kinds are never Claude Code session models.",
+      "if": {
+        "properties": {
+          "artifact": {
+            "properties": {
+              "kind": { "enum": ["draft_model", "tts_model", "depth_estimation_model", "adapter", "processor"] }
+            },
+            "required": ["kind"]
+          }
+        },
+        "required": ["artifact"]
+      },
+      "then": {
+        "properties": { "artifact": { "properties": { "session_eligible": { "const": false } } } }
+      }
+    }
+  ]
+}

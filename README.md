@@ -20,6 +20,8 @@ and with wrapped launchers.
 ## Project documentation
 
 - [Changelog](CHANGELOG.md) — release history and current unreleased work
+- [Portable model manifest v1](docs/model-manifest-v1.md) — the self-describing metadata spec for
+  `~/.models`, so any consumer can discover installed artifacts without this checkout
 
 ## Two ways to use it
 

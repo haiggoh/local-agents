@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "artifact": { "kind": "tts_model", "launchable": true, "session_eligible": true, "directory_name": "Kokoro-82M", "format": "safetensors" },
+  "acquisition": { "status": "complete" }
+}

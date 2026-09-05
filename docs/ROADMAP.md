@@ -179,6 +179,33 @@ silent dotfile mutation; published assets are immutable and checksummed.
 
 ---
 
+## Portable model manifests — specced, first slice landed
+
+`docs/model-manifest-v1.md` and `docs/schema/local-model-manifest-v1.schema.json` define a
+`.local-model-manifest.json` written BESIDE each artifact's weights, so `~/.models` becomes
+self-describing and a second consumer (AGY) can read it with no `local-agents` checkout. Governing
+plan: `~/.claude/plans/Plan — Portable Local-Model Manifests, Researched Catalogue, and
+Context-Aware Sessions (Merged Update).md`.
+
+**Landed:** the spec, the JSON Schema, 17 fixtures, and a stdlib-only contract test that asserts each
+invalid fixture fails for its own stated reason. All of it is inert — nothing reads or writes
+`~/.models` yet.
+
+**Not landed, in dependency order:** the writer/validator/inspector/reconciler tooling · downloader
+integration so completion writes a truthful manifest atomically · manifest-driven context and
+autocompaction in CSL · the controlled 44-entry backfill behind its eleven gates · runtime
+qualification evidence · the AGY consumer.
+
+**The gate before any of that:** the source-of-truth decision. `config/model-catalogue-context-list.yaml`
+is now tracked as reviewed INPUT and provenance — not as truth, and not as a second editable copy of
+what a manifest will own. That role is stated in the spec §7 and must not drift: YAML, PSV and
+manifests must never be three independently editable descriptions of one artifact.
+
+Two corrections this work already forced, recorded so they are not re-derived: the plan located the
+YAML at the repository root (it is under `config/`), and it described `main` as being at `1dbdcce`
+with the latest tag `v0.13.7` — `main` has since moved to `1d33fc1` and carries three unreleased
+commits past that tag, so no version number may be assumed from the plan.
+
 ## Deliberately deferred
 
 Not roadmap items. Recorded so they are not mistaken for oversights (§20). `0.14.0` should build the

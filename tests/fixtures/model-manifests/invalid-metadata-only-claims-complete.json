@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "artifact": { "kind": "model", "launchable": true, "session_eligible": true, "directory_name": "Shell-Only-4bit", "format": "mlx", "payload_bytes": 0 },
+  "acquisition": { "status": "complete" }
+}

@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "artifact": {
+    "kind": "draft_model",
+    "launchable": false,
+    "session_eligible": false,
+    "directory_name": "Qwen3.8-27B-MTP-4bit",
+    "format": "mlx",
+    "target_directory_name": "Qwen3.8-27B-4bit",
+    "source": { "provider": "huggingface", "repository": "mlx-community/Qwen3.8-27B-MTP-4bit" },
+    "payload_bytes": 1073741824
+  },
+  "acquisition": { "status": "complete", "producer": { "name": "local-agents", "version": "0.13.7" } }
+}
