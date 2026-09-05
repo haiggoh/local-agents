@@ -47,7 +47,19 @@ _apply_session_profile() {
 # `acceptEdits`, so every consequential Bash call is judged by the separate safety-classifier
 # routed to the local backend (same server, --max-num-seqs=2 gives it a slot). The toggle is
 # inherited by the launcher via LA_AUTO_MODE=1 and is not persisted to the parent shell.
-AUTO_MODE="${CSL_AUTO_MODE:-0}"
+#
+# Defaults ON since local classifier routing was verified end-to-end (2026-09-05): the local server
+# logged the classifier arriving as `model='claude-sonnet-5' ... served by loaded engine`, with no
+# request to the cloud gateway, and the judged action then ran. Auto mode is the better default
+# BECAUSE the classifier is local — it costs $0 and cannot be taken away by a cloud 429 or a spent
+# budget, which is the whole reason a local session exists. Turn it off with `a`, or set
+# CSL_AUTO_MODE=0 to opt out by default.
+#
+# Cost of the default, so it is chosen knowingly: a consequential call that is NOT already covered
+# by a permissions allowlist entry pays one extra local request (measured 27s for a 35k-token
+# classifier prompt on a cold cache). Allowlisted and read-only calls never reach the classifier at
+# all, so ordinary work is unaffected.
+AUTO_MODE="${CSL_AUTO_MODE:-1}"
 
 # Argument passthrough still skips the picker and watcher. It now receives the
 # same selected-model profile as an interactive numbered choice.

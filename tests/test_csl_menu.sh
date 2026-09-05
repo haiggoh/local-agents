@@ -68,7 +68,9 @@ CSL_TEST_CONFIG
 
 cat > "$SB/bin/stub-launcher" <<'CSL_STUB_LAUNCHER'
 #!/usr/bin/env bash
-printf '%s|%s\n' "${1:-}" "${2:-}" > "$CSL_TEST_RESULT"
+# Record LA_AUTO_MODE too: the menu text is cosmetic, but the value the launcher
+# actually receives is the contract, so assert on that.
+printf '%s|%s|auto=%s\n' "${1:-}" "${2:-}" "${LA_AUTO_MODE:-unset}" > "$CSL_TEST_RESULT"
 CSL_STUB_LAUNCHER
 chmod +x "$SB/bin/csl" "$SB/bin/stub-launcher"
 
@@ -99,6 +101,8 @@ assert_no_grep 'Recommended pairings' "$out" \
   'role recommendations no longer replace the model list'
 assert_grep 'watcher: OFF' "$out" 'watcher defaults off'
 assert_no_grep 'watcher: ON' "$out" 'watcher is not enabled implicitly'
+assert_grep 'auto-mode: ON' "$out" 'auto mode defaults on (local classifier is free)'
+assert_no_grep 'auto-mode: OFF' "$out" 'auto mode is not silently disabled'
 assert_grep 'c) choose a listed model × custom effort' "$out" \
   'custom effort composition remains available'
 
@@ -124,6 +128,30 @@ out="$(
       bash "$SB/bin/csl" 2>&1
 )"
 assert_grep 'watcher: ON' "$out" 'CSL_WATCH=1 opts in by default'
+
+echo "== 5. auto mode can be opted OUT of by default =="
+out="$(
+  printf 'q\n' |
+    HOME="$SB/home" \
+    CSL_AUTO_MODE=0 \
+    CSL_LAUNCHER="$SB/bin/stub-launcher" \
+    CSL_TEST_RESULT="$SB/auto-off-result" \
+      bash "$SB/bin/csl" 2>&1
+)"
+assert_grep 'auto-mode: OFF' "$out" 'CSL_AUTO_MODE=0 opts out by default'
+assert_no_grep 'auto-mode: ON' "$out" 'the opt-out is not overridden by the new default'
+
+echo "== 6. the launcher RECEIVES the auto-mode default, not just the menu text =="
+rm -f "$SB/auto-launch-result"
+run_csl '1\n' "$SB/auto-launch-result" >/dev/null
+assert_grep 'alpha|high|auto=1' "$(cat "$SB/auto-launch-result" 2>/dev/null)" \
+  'a default launch hands the launcher LA_AUTO_MODE=1'
+
+echo "== 7. pressing a turns the ON default off, all the way to the launcher =="
+rm -f "$SB/auto-toggled-result"
+run_csl 'a\n1\n' "$SB/auto-toggled-result" >/dev/null
+assert_grep 'alpha|high|auto=0' "$(cat "$SB/auto-toggled-result" 2>/dev/null)" \
+  'the a toggle reaches the launcher as LA_AUTO_MODE=0'
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

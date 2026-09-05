@@ -172,8 +172,8 @@ fi
 
 # Pick a spoof id THIS PORT ACTUALLY SERVES (hotswap may reuse a server started from older config).
 _pick_spoof() {
-    local _port="$1" _list="$2" _c
-    local _served=$(curl -s --max-time 5 "http://localhost:${_port}/v1/models" 2>/dev/null | grep -o '"id":"[^"]*"' | cut -d'"' -f4 | tr '\n' ' ')
+    local _port="$1" _list="$2" _c _served
+    _served=$(curl -s --max-time 5 "http://localhost:${_port}/v1/models" 2>/dev/null | grep -o '"id":"[^"]*"' | cut -d'"' -f4 | tr '\n' ' ')
     for _c in $(printf '%s' "$_list" | tr ',' ' '); do
         case " $_served " in *" $_c "*) printf '%s' "$_c"; return 0 ;; esac
     done
