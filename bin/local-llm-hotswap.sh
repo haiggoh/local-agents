@@ -77,6 +77,35 @@ wait_ready() {
     fi
 }
 
+# _preflight_warmup: send a minimal completion to prove the model actually CAN respond, not just
+# that its HTTP listener accepted /v1/models. wait_ready only checks that /v1/models returns 200 —
+# Rapid's internal warmup (Metal shader compilation + GatedDeltaNet kernels + tool-grammar warmup)
+# runs AFTER the HTTP listener starts, so the first real request still pays the full cold-prefill
+# penalty (measured: 50.3s on a 27B against a warm /v1/models). This probe drains that penalty
+# BEFORE SUCCESS_PORT is returned, so the caller's first turn is warm.
+#
+# Guarded by LA_HOTSWAP_PREFLIGHT=0 to skip (the real launcher is OK with a cold first turn).
+# The probe is kept deliberately tiny: 3-token prompt, max_tokens=3, no thinking, no tool use,
+# no system prompt — the smallest request that actually walks the forward path through the model.
+# Timeout defaults to 1/4 of the server's per-request cap so a wedged server still fails fast.
+_preflight_warmup() {
+    local port="$1" spoof="$2" timeout="${3:-$(( ${LA_SERVER_TIMEOUT_S:-300} / 4 ))}"
+    [ "${LA_HOTSWAP_PREFLIGHT:-1}" = "0" ] && return 0
+    local start=$SECONDS resp code ms
+    resp=$(curl -s --max-time "$timeout" -X POST "http://localhost:$port/v1/chat/completions" \
+        -H "Content-Type: application/json" \
+        -d "{\"model\":\"$spoof\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":3}") || true
+    ms=$(( (SECONDS - start) * 1000 ))
+    code=$(printf '%s' "$resp" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("choices",[{}])[0].get("finish_reason","?"))' 2>/dev/null || echo "?")
+    if [ "$code" = "?" ] || [ -z "$code" ]; then
+        echo "⚠️  Preflight warmup FAILED (finish_reason=$code, ${ms}ms) — server may still be initializing."
+        echo "   First caller turn may pay the full cold-prefill penalty."
+        return 1
+    fi
+    echo "✅ Preflight warmup OK (finish_reason=$code, ${ms}ms)"
+    return 0
+}
+
 echo "Scanning ports $LA_PORT_START-$LA_PORT_MAX for a free slot (config: ${LA_CONFIG_SOURCE})..."
 TARGET_PORT=""
 for ((port=LA_PORT_START; port<=LA_PORT_MAX; port++)); do
@@ -221,6 +250,7 @@ if [ "$SERVE" = "rapid" ]; then
 
     wait_ready "$TARGET_PORT" "$LOG_FILE" "$MODEL_NAME" "$RAPID_PID" "$SPOOF_PRIMARY"
     tail -n 12 "$LOG_FILE"
+    _preflight_warmup "$TARGET_PORT" "$SPOOF_PRIMARY"
     echo "SUCCESS_PORT=$TARGET_PORT"
     exit 0
 fi
@@ -232,6 +262,7 @@ if [ "$SERVE" = "mlx_lm" ]; then
         --max-tokens 4096 > "$LOG_FILE" 2>&1 &
     wait_ready "$TARGET_PORT" "$LOG_FILE" "$MODEL_NAME" "$!" "$MODEL_DIR"
     echo "ℹ️  $MODEL_NAME model id = $MODEL_DIR  (use as the 'model' field when dispatching)"
+    _preflight_warmup "$TARGET_PORT" "$MODEL_DIR"
     echo "SUCCESS_PORT=$TARGET_PORT"; exit 0
 fi
 
@@ -295,4 +326,5 @@ echo "🚀 Launching $MODEL_NAME on free port $TARGET_PORT  (🧠 thinking: $VLL
 nohup "$LA_VENV/vllm-mlx" serve --models-config "$TMP_CONFIG" --port "$TARGET_PORT" $EXTRA_ARGS > "$LOG_FILE" 2>&1 &
 wait_ready "$TARGET_PORT" "$LOG_FILE" "$MODEL_NAME" "$!" "$SPOOF_PRIMARY"
 tail -n 8 "$LOG_FILE"
+_preflight_warmup "$TARGET_PORT" "$SPOOF_PRIMARY"
 echo "SUCCESS_PORT=$TARGET_PORT"

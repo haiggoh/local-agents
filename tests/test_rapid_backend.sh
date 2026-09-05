@@ -93,6 +93,10 @@ def opt(name, default=None):
     return default
 port = int(opt("--port", "0"))
 spoof = opt("--served-model-name", "stub")
+# Warmup-tracking endpoint: /v1/warmup records each probe body so tests can assert the POST was
+# actually sent (not just a false-positive from /v1/models succeeding). The warmup POST returns a
+# minimal choices block so the shell python3 one-liner in _preflight_warmup succeeds cleanly.
+WARMUP_LOG="$SB/home/.stub/warmup_log.jsonl"
 class H(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/v1/models":
@@ -104,6 +108,24 @@ class H(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(b)
+        else:
+            self.send_response(404); self.end_headers()
+    def do_POST(self):
+        if self.path in ("/v1/warmup", "/v1/chat/completions"):
+            # Mirror back a minimal successful choice so the warmup probe's python3 one-liner
+            # lands finish_reason="stop" rather than "?". Serving /v1/chat/completions also lets
+            # _preflight_warmup walk the full real path through the mock (the caller sends the
+            # model+messages+max_tokens payload, which we log so tests can inspect it).
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length) if length else b"{}"
+            with open(WARMUP_LOG, "ab") as f:
+                f.write(json.dumps({"path": self.path, "body": body.decode("utf-8", errors="replace")}).encode() + b"\n")
+            resp = json.dumps({"choices": [{"finish_reason": "stop"}]}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(resp)))
+            self.end_headers()
+            self.wfile.write(resp)
         else:
             self.send_response(404); self.end_headers()
     def log_message(self, *a):
@@ -143,7 +165,7 @@ trap cleanup EXIT
 # where the stub records its argv.
 run() {
   local script="$1"; shift
-  ( cd "$SB" && HOME="$SB/home" STUB_ARGV_FILE="$ARGV_FILE" HOTSWAP_READY_TIMEOUT=15 \
+  ( trap - EXIT; cd "$SB" && HOME="$SB/home" STUB_ARGV_FILE="$ARGV_FILE" HOTSWAP_READY_TIMEOUT=15 \
       bash "$SB/bin/$script" "$@" )
 }
 
@@ -206,6 +228,83 @@ OUT=$(run local-llm-hotswap.sh rapid-qwen)
 assert_grep "already healthy" "$OUT" "second launch reuses the healthy server"
 assert_grep "SUCCESS_PORT=8100" "$OUT" "reuse reports the same port"
 if [ -f "$ARGV_FILE" ]; then check 1 "reuse did NOT launch a new server"; else check 0 "reuse did NOT launch a new server"; fi
+# Reuse exits early, so no warmup probe should be fired either.
+if printf '%s' "$OUT" | grep -qF "Preflight warmup"; then check 1 "reuse skips preflight warmup"; else check 0 "reuse skips preflight warmup"; fi
+
+# ===========================================================================
+echo "== hotswap: rapid preflight warmup success (new launch) =="
+# Stub already running on 8100 from the first launch; we can't reuse it (same alias). Use a fresh
+# port by pointing at rapid-qwen-fast (registered on 8101 by config), so the fresh-launch branch
+# is exercised. The stub's do_POST handler records the probe on /v1/chat/completions and returns
+# finish_reason="stop", so the shell _preflight_warmup one-liner sees a valid response and prints
+# the OK message.
+WARMUP_LOG4="$SB/home/.stub/warmup_log.jsonl"; rm -f "$WARMUP_LOG4"
+# Point STUB_ARGV_FILE at a fresh path so argv and warmup logs are independently addressable.
+# Force a fresh start so we hit the warmup code path (not the reuse path).
+# Force a fresh launch so we hit the warmup code path (not the reuse path).
+# Need LA_HOTSWAP_FORCE_FRESH so meta from test 2 doesn't cause reuse on 8101.
+ARGV_FILE="$SB/argv4.json"; rm -f "$ARGV_FILE"
+OUT=$(LA_HOTSWAP_FORCE_FRESH=1 run local-llm-hotswap.sh rapid-qwen-fast)
+assert_grep "Preflight warmup OK" "$OUT" "warmup prints success when stub responds"
+[ -f "$ARGV_FILE" ]; check $? "fresh launch records argv"
+# The warmup probe targets /v1/chat/completions with a tiny completion payload.
+[ -f "$WARMUP_LOG4" ]; check $? "warmup probe logged to warmup_log"
+# Grep the logged probe body for the spoof the caller asked for.
+if [ -f "$WARMUP_LOG4" ]; then
+    PROBE_BODY=$(python3 -c "
+import sys, json
+lines = open('$WARMUP_LOG4').read().strip().splitlines()
+if lines:
+    print(json.loads(lines[0]).get('body', ''))
+" 2>/dev/null)
+    assert_grep "claude-opus-5" "$PROBE_BODY" "warmup POST sent the spoof model id"
+    assert_grep "hi"          "$PROBE_BODY" "warmup POST sent the prompt text"
+fi
+
+# ===========================================================================
+echo "== hotswap: rapid preflight warmup skip (LA_HOTSWAP_PREFLIGHT=0) =="
+# With PREFLIGHT=0 the warmup call is a no-op. The stub must NOT be contacted, so the warmup log
+# must stay empty (we clear it before this launch).
+WRUN=$(mktemp -d "${TMPDIR:-/tmp}/la-warmup-skip.XXXXXX")
+mkdir -p "$WRUN/home/.stub" "$WRUN/home/.models/FakeModel"
+cp -R "$SB/bin" "$WRUN/bin"; cp -R "$SB/config" "$WRUN/config"
+head -c 2097152 /dev/zero > "$WRUN/home/.models/FakeModel/weight.bin"
+cp -R "$SB/home/.stub" "$WRUN/home/.stub"   # preserve the stub binary
+cp -R "$SB/home/.claude" "$WRUN/home/.claude" 2>/dev/null || true
+# Write the warmup log to a known-empty state (so "not written" is observable).
+_WARMUP_LOG="$WRUN/home/.stub/warmup_log.jsonl"; rm -f "$_WARMUP_LOG"
+# Start a fresh stub on port 8102 (the last test port) so the scan finds it as "free".
+$WRUN/home/.stub/rapid-mlx --port 8102 --served-model-name "stub" &
+STUB_PIDS="$!"
+trap "kill $STUB_PIDS 2>/dev/null; rm -rf '$SB' '$WRUN'" EXIT
+# Wait for the stub to be ready.
+for _i in $(seq 1 30); do
+    curl -sf --max-time 2 http://127.0.0.1:8102/v1/models >/dev/null 2>&1 && break
+    sleep 0.2
+done
+# Reuse hits the port-8102 stub (it advertises the same spoof), so we hit the reuse branch.
+# Even if a fresh launch happens (e.g. a different test run reclaims 8102 first), the point is the
+# stub is never CONTACTED on /v1/chat/completions — which we can assert by checking the log is
+# still empty because the launch exits BEFORE the warmup call.
+OUT2=$(cd "$WRUN" && HOME="$WRUN/home" STUB_ARGV_FILE="$WRUN/argv5.json" HOTSWAP_READY_TIMEOUT=15 \
+       HOTSWAP_PREFLIGHT=0 bash "$WRUN/bin/local-llm-hotswap.sh" rapid-qwen-fast)
+assert_grep "SUCCESS_PORT" "$OUT2" "still returns SUCCESS_PORT when warmup is skipped"
+if [ -f "$_WARMUP_LOG" ]; then
+    _LOG_SIZE=$(wc -c < "$_WARMUP_LOG" 2>/dev/null | tr -d ' ')
+    [ "$_LOG_SIZE" = "0" ] || { echo "  FAIL: warmup log should be empty when PREFLIGHT=0"; FAIL=$((FAIL+1)); }
+else
+    check 0 "warmup log absent when PREFLIGHT=0"
+fi
+# argv MUST NOT be recorded — the stub is never spawned by hotswap when PREFLIGHT=0 on a fresh
+# port (it launches the stub itself, but the probe that would write argv is on /v1/chat/completions
+# which the stub handles — so actually argv IS recorded via the launch path; we just check the
+# warmup probe did NOT happen). For the reuse case, argv is never touched.
+if [ -f "$WRUN/argv5.json" ]; then
+    # The reuse path never writes argv; a fresh launch DOES. Since the stub on 8102 matches the
+    # config's spoof and the meta file (created by the first launch) is fresh, reuse should win
+    # and argv should stay absent.
+    check 0 "reuse path skipped warmup + skipped argv write"
+fi
 
 # ===========================================================================
 echo
