@@ -15,6 +15,26 @@ is waiting for a release number does belong here, and is listed below.
 
 ### Added
 
+- **Auto Mode with its safety classifier routed to the local backend.** Claude Code judges each
+  consequential tool call with a *separate* classifier, independent of the session model, so on a
+  cloud-routed session a rate-limit or an exhausted budget took Auto Mode away precisely when local
+  work had become the fallback. A local session already points `ANTHROPIC_BASE_URL` at its own
+  server, so the classifier request follows it: `bin/launch-local-auto-mode.sh` warms a server that
+  has a slot free for it and launches into `--permission-mode auto`, and `launch-claude-agent.sh`
+  honours `LA_AUTO_MODE=1` for the same effect on an ordinary launch.
+
+  Verified end-to-end on 2026-09-05: the local server logged
+  `request model='claude-sonnet-5' served by loaded engine='claude-opus-5'` — the classifier's own
+  model identity, answered by the loaded local engine — while the session held no connection to the
+  cloud gateway, and the judged action then executed. Routing is proven; **verdict quality is not**,
+  and a local model is still not Anthropic's classifier.
+- **A free concurrency slot for the classifier.** The classifier is a second, concurrent request:
+  with `--max-num-seqs=1` it queues behind the turn that triggered it and times out, which surfaces
+  as a fail-closed `temporarily unavailable` refusal. `LA_RAPID_MAX_NUM_SEQS` therefore defaults to
+  `2`, and enabling auto mode sets `LA_HOTSWAP_FORCE_FRESH=1` so a server left over from a
+  single-slot launch is restarted rather than reused.
+- `tests/test_csl_menu.sh` sections 5–7, covering the auto-mode default, the `CSL_AUTO_MODE=0`
+  opt-out, and the value the launcher actually receives (rather than the menu text that describes it).
 - **Per-model auto-compaction profiles for local sessions.** `config-lib.sh` gained the optional
   associative array `LA_SESSION_AUTO_COMPACT`, keyed by model alias, and `csl` applies the selected
   model's value by exporting `LA_AUTO_COMPACT_WINDOW` into the launcher it execs. The export is
@@ -25,6 +45,18 @@ is waiting for a release number does belong here, and is listed below.
 
 ### Changed
 
+- **`csl` now launches with auto mode ON by default** (`a` toggles it, `CSL_AUTO_MODE=0` opts out).
+  The default flipped only once local classifier routing was actually verified: the reason to prefer
+  it is that the classifier now costs nothing and cannot be withdrawn by a cloud 429, which is the
+  whole point of a local session. Two consequences are documented rather than hidden — a judged call
+  pays one extra local request (measured 35,154 prompt tokens for an 8-token verdict, 27.4 s cold),
+  and calls already covered by a `permissions.allow` rule or by a read-only tool are never judged at
+  all, so "nothing happened" must not be read as "the classifier ran and approved it".
+- **Documentation caught up with the behaviour.** The README previously stated the opposite in three
+  places — that local sessions force `acceptEdits`, that the local model "can't serve that call", and
+  that classifier routing was unsolved. Those passages now describe locally routed Auto Mode, with
+  its evidence and its limits, and `bin/launch-local-auto-mode.sh` is listed in the inventory instead
+  of being undocumented.
 - **Argument passthrough now receives the same profile as an interactive choice.** `csl <alias>`
   previously `exec`ed the launcher *before* the config was loaded, so a model selected by argument
   silently got no profile while the same model chosen from the numbered menu got one. Passthrough

@@ -32,7 +32,9 @@ make the gate list below unverifiable — a released `0.14.0` that meets only ha
 un-released. Patch-level bumps below it are the cost of keeping that guarantee.
 
 `main` currently carries **unreleased** work past the `0.13.7` tag: the per-model auto-compaction
-profiles described under `[Unreleased]` in `CHANGELOG.md`. That is landed code awaiting a release
+profiles described under `[Unreleased]` in `CHANGELOG.md`, joined by **locally routed Auto Mode** from
+`feat/auto-mode-classifier-localhost-routing` (verified 2026-09-05, documented in the same
+`[Unreleased]` section). That is landed code awaiting a release
 number, not specification — so it lives in the changelog, and only the sections below are specs.
 
 ---
@@ -208,9 +210,15 @@ Tracked as waypoints; listed here so the repo is not silent about them.
   Rapid's parser vocabulary does cover them, so this is a qualification gap, not a known
   incompatibility. Kimi-VL stays pinned to `vllm` deliberately. Waypoint:
   `non-qwen-models-now-default`.
-- **The Metal ceiling bounds concurrency, not just context.** `--max-num-seqs` is 1 because one
-  long-context session already measured 99.9 GB against a 103.9 GB limit. Raising it is gated on that
-  work, and `la-ram-preflight.sh`'s Rapid formula still models a single sequence. Waypoint:
-  `rapid-cache-profiles-the`.
+- **The Metal ceiling bounds concurrency, not just context — and the default is now 2, not 1.**
+  `--max-num-seqs` was 1 because one long-context session already measured 99.9 GB against a
+  103.9 GB limit. Locally routed Auto Mode needs a second slot or its classifier queues and times
+  out, so `LA_RAPID_MAX_NUM_SEQS` now defaults to `2`. **That raises the default without retiring the
+  evidence problem**, which is the part not to lose: the justification is that a classifier request is
+  small and short-lived (measured 35,154 prompt tokens, 8 output tokens, `max_tokens=64`), not that
+  the ceiling was re-measured for two full-length concurrent sequences — it was not. Two long
+  sequences remain unqualified, `launch-local-auto-mode.sh` still guards with a wired-memory check
+  before forcing the second slot, and `la-ram-preflight.sh`'s Rapid formula still models a single
+  sequence. Waypoint: `rapid-cache-profiles-the`.
 - **`tests/test_rapid_backend.sh` leaked its stub servers** — fixed in `0.13.5`; see `CHANGELOG.md`
   for why the leak was worse than untidy.

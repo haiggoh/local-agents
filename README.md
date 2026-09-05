@@ -112,6 +112,12 @@ in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 - **`bin/launch-claude-agent.sh`** — start an interactive local Claude Code session (hotswaps a
   model onto a free port, sets direct-routing env, and renders the external local-session prompt
   template with actual model/backend/port metadata).
+- **`bin/launch-local-auto-mode.sh`** — the standalone harness for
+  [Auto Mode with a local classifier](#auto-mode-with-a-local-classifier): it warms a server that has
+  a free slot for the classifier, launches straight into `--permission-mode auto`, and hands the
+  session a first action deliberately chosen to exercise the classifier, so a run either proves local
+  routing or fails closed. Opt-in (`JOYIA_LOCAL_AUTO_CLASSIFIER=1`) because it is a probe; for
+  everyday use the `csl` toggle covers the same ground.
 - **`bin/local-llm-hotswap.sh`** — land a registered model on the first free port; safe (never kills
   a healthy model on another port); bounded readiness with diagnostics.
 - **`bin/local-agent-dispatch.py`** — universal local model dispatcher, independent of any AI client
@@ -378,7 +384,8 @@ was noticeably faster than Qwen 3.8. Ornith thinking remains untested.
 ### Per-launch profiles for full local sessions
 
 `launch-claude-agent.sh` owns the local routing invariants: the compatibility model id, direct
-localhost endpoint, `acceptEdits` permission mode, RAM preflight, server lifecycle, strict-MCP
+localhost endpoint, permission mode (`auto` by default from `csl`, `acceptEdits` when auto mode is
+switched off), RAM preflight, server lifecycle, strict-MCP
 default, and the local runtime-safety prompt. Four optional environment variables let one launch
 narrow its Claude Code profile without unrestricted argument forwarding or persistent changes to
 global Claude Code settings:
@@ -431,9 +438,10 @@ __LA_HOTSWAP_PATH__
 
 Machine-local `LA_MEMORY_DIR` and `LA_COUNCIL_NOTE` additions are appended afterward when configured.
 
-These controls do not change the permission-mode boundary: ordinary local sessions still use
-`acceptEdits`. Enabling the `Agent` tool does not by itself make Auto Mode work with a spoofed local
-model; classifier routing remains a separate qualification and safety problem.
+These controls do not change the permission-mode boundary, which is owned by the launcher and by the
+`csl` auto-mode toggle (see [Auto Mode with a local classifier](#auto-mode-with-a-local-classifier)),
+never by argument forwarding. Enabling the `Agent` tool does not by itself change how Auto Mode's
+classifier is routed or how good its verdicts are — those stay separate questions.
 
 ### The picker: why a session is chosen differently from a dispatch
 
@@ -455,6 +463,53 @@ selectable, while custom effort composition remains reachable through `c`.
 
 The watcher is **off by default**, so an ordinary selection opens only the requested session. Toggle
 it with `w` in the picker, or set `CSL_WATCH=1` to opt in by default.
+
+Auto mode is **on by default** — toggle it with `a`, or set `CSL_AUTO_MODE=0` to opt out. See the
+next section for what that actually buys and what it costs.
+
+### Auto Mode with a local classifier
+
+Claude Code's Auto Mode judges each consequential tool call with a **separate safety classifier**,
+independent of the model you picked for the session. On a cloud-routed session that classifier is a
+cloud request, which is why a rate-limit or a spent budget used to take Auto Mode away exactly when
+you had fallen back to local work. Because a local session points `ANTHROPIC_BASE_URL` at your own
+server, the classifier request follows it and is answered locally, for free.
+
+`csl` therefore launches with `--permission-mode auto` by default. Turn it off with `a` in the picker
+(or `CSL_AUTO_MODE=0`) and the launcher uses `acceptEdits` as before.
+
+**Verified 2026-09-05**, on `kat-coder-optiq` served by Rapid-MLX: the local server logged the
+classifier arriving under its own model identity and being answered by the loaded engine —
+
+```text
+[REQUEST] POST /v1/messages  model='claude-sonnet-5'  max_tokens=64  stream=False  tools=0
+Anthropic /v1/messages: request model='claude-sonnet-5' served by loaded engine='claude-opus-5'
+```
+
+— while the session held no connection to the cloud gateway at all, and the judged action then ran.
+Note the classifier asks for `claude-sonnet-5` even though the session runs as `claude-opus-5`: your
+spoof list has to cover it, which it does automatically because Rapid-MLX answers any requested id
+with the loaded engine.
+
+What it costs, so the default is chosen knowingly:
+
+- **A free slot is mandatory.** The classifier is a *second, concurrent* request. With
+  `--max-num-seqs=1` it queues behind the turn that triggered it and times out — the session then
+  refuses the action with `temporarily unavailable`, which is the fail-closed path, not a hang. The
+  default is now `--max-num-seqs=2` for exactly this reason, and auto mode forces a fresh server
+  start so a server left over from a 1-slot launch is replaced rather than reused.
+- **A judged call is slow.** The classifier prompt carries the transcript: measured **35,154 prompt
+  tokens for an 8-token verdict, 27.4 s** on a cold prompt cache.
+- **Most calls are never judged.** Read-only tools bypass the classifier entirely, and so does
+  anything already covered by a `permissions.allow` rule. If you have accumulated a long allowlist,
+  ordinary work will not slow down at all — but do not read "nothing happened" as "the classifier is
+  not running". Test it with something *outside* your allowlist.
+
+Two honest limits. Routing being local says nothing about **verdict quality** — a local model is not
+Anthropic's classifier, and its judgements have not been scored against it, so keep human approval
+for genuinely high-risk actions. And the airtight offline proof (block the gateway, then re-run) is
+still outstanding; the evidence above is a positive observation of the request arriving locally, not
+a demonstration that no fallback path exists.
 
 ### What to expect from a local session
 
@@ -599,10 +654,15 @@ Re-apply after any `vllm-mlx` reinstall/upgrade: `git -C <vllm-mlx> apply vllm-m
 - **Self-preservation.** The launcher tells the local model it *is* the server on its port and must
   never kill processes on the serving ports — a local session that "frees ports to start fresh" would
   kill its own runtime. `hotswap` only ever lands on a *free* port and never kills a healthy model.
-- **`acceptEdits`, not Auto Mode.** Auto Mode uses the session model as a tool-safety classifier, but
-  the local spoofed model can't serve that call (it loops on "temporarily unavailable"). The launcher
-  forces `--permission-mode acceptEdits` (edits auto-apply; other tools prompt). For high-risk actions
-  keep human approval — a local model is not Anthropic's safety classifier.
+- **Auto Mode, with its classifier routed locally — and a limit worth reading.** Auto Mode judges
+  consequential calls with a *separate* classifier; because a local session points
+  `ANTHROPIC_BASE_URL` at your own server, that request is served locally and for free
+  ([details and evidence](#auto-mode-with-a-local-classifier)). `csl` defaults to it, and `a` /
+  `CSL_AUTO_MODE=0` falls back to `acceptEdits` (edits auto-apply; other tools prompt). But routing is
+  not equivalence: **a local model is not Anthropic's safety classifier**, its verdicts have not been
+  scored against it, and a long `permissions.allow` list means many calls are never judged at all. For
+  genuinely high-risk actions, keep human approval. The failure mode is at least the safe one — no
+  verdict means no execution, not a silent allow.
 - **No reasoning leakage.** The nudge forbids emitting `<think>` markup / raw chain-of-thought into
   visible output or tool arguments.
 - **`la-evict` is a last resort, and a conservative one.** The escape hatch for when the machine is already out of RAM and the normal lifecycle is unresponsive: it never bulk-kills the roster, never touches a server with a live session on its first pass, and escalates only one step per repeat call inside the window — so a healthy stack is left alone. Deliberately standalone (no `config-lib.sh`, no registry): a fallback that runs while the stack is sick must not depend on the stack.
