@@ -55,6 +55,9 @@ check $? "Claude Code is routed to the isolated oMLX endpoint"
 grep -qF 'LA_OMLX_DRY_RUN' "$LAUNCHER"
 check $? "integration can be validated without starting a server"
 
+grep -qF 'probe_command+=(-- "$probe_prompt")' "$GATE"
+check $? "variadic Claude options cannot consume the probe prompt"
+
 grep -qF 'omlx-progress.sh' "$LAUNCHER"
 check $? "oMLX launcher loads the progress component"
 

@@ -475,7 +475,7 @@ la_omlx_capture_genuine() {
         )
     fi
 
-    probe_command+=("$probe_prompt")
+    probe_command+=(-- "$probe_prompt")
 
     la_progress_run \
         "$label" \
