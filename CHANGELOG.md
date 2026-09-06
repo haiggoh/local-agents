@@ -8,23 +8,46 @@ Where no Git tag exists, the release heading links directly to its release commi
 
 ## [Unreleased]
 
+Nothing is currently awaiting a release number.
+
+## [0.13.9] — 2026-09-06
+
 ### Added
 
-- Add an opt-in oMLX backend for local Auto Mode. It serves the session and
-  dense classifier under separate Claude model IDs on one endpoint and uses
-  oMLX's persistent paged prefix cache. Acceptance evidence: 12,544 of 13,856
-  tokens and 13,824 of 15,004 tokens reused on growing classifier-style
-  requests; latency fell from 75.8 seconds cold to 9.7 and 8.6 seconds.
+- Enable Claude Code's segmented Auto Mode transcript representation for
+  local Auto Mode sessions, with a one-launch opt-out. This gives inference
+  backends stable, message-aligned classifier-history boundaries.
+- Add an oMLX Auto Mode backend that serves the selected local session model
+  as `claude-opus-5` and a separate dense classifier as
+  `claude-sonnet-5` on one isolated Anthropic-compatible endpoint.
+- Add persistent oMLX paged SSD caching with an in-memory hot cache and
+  write-through durability.
 
+### Fixed
 
-Planned-but-unshipped *specification* work is tracked in **[`docs/ROADMAP.md`](docs/ROADMAP.md)**,
-not here: an empty heading was previously mistaken for "there is no unshipped spec", when in fact
-the whole `0.14.0` specification existed outside the repository. Code that has landed on `main` and
-is waiting for a release number does belong here.
+- Fix the released `0.13.8` Auto Mode path timing out as classifier history
+  grew. The original second-slot explanation was not the binding issue:
+  measured classifier requests were already admitted with
+  `running=1 waiting=0`; repeated full-prefix prefill crossed Claude Code's
+  classifier deadline.
+- Isolate each local-agents oMLX server with a private `--base-path` and
+  disable unrelated Hugging Face cache discovery. This prevents a session
+  launch from rewriting or being respawned by the managed Homebrew oMLX
+  service.
+- Resolve the session model through `LA_CUR_DIR`, the actual registry
+  contract, rather than the nonexistent `LA_CUR_SUBDIR`.
 
-Nothing is currently awaiting a release number: everything that had accumulated past `v0.13.7`
-shipped as `0.13.8` below. The portable-model-manifest specification lives on
-`feature/portable-model-manifests` and is **not** on `main`, so it is deliberately absent here.
+### Validated
+
+- Synthetic growing-prefix acceptance reused 12,544 of 13,856 tokens and
+  13,824 of 15,004 tokens. Latency fell from 75.8 seconds cold to 9.7 and
+  8.6 seconds.
+- A real lean local Claude Code session launched with Ornith as
+  `claude-opus-5`, the dense DeepSeek classifier as `claude-sonnet-5`,
+  segmented transcript mode enabled, and Auto Mode on. A consequential Bash
+  action completed successfully through the local oMLX endpoint.
+- Rapid remains available as an immediate rollback through
+  `LA_AUTO_MODE_RUNTIME=rapid`.
 
 ## [0.13.8] — 2026-09-05
 

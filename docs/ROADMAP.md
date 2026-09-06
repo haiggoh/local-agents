@@ -16,7 +16,7 @@ version. Nothing is deleted for being inconvenient. If an item is abandoned, it 
 
 ## Current released version
 
-`0.13.8`. See `CHANGELOG.md`.
+`0.13.9`. See `CHANGELOG.md`.
 
 > Keeping this line correct is the smallest possible test of whether this file is being maintained.
 > If it disagrees with `.claude-plugin/plugin.json`, treat everything below as suspect too.
@@ -152,6 +152,14 @@ Homebrew remains rejected for this: it will not pin `mlx`. Reasons are on record
 `rapid-mlx-venv-vs-homebrew` so they are not re-litigated.
 
 ### Locally routed Auto Mode correctness
+
+**Released in `0.13.9` on 2026-09-06.** The operational fix uses segmented
+classifier transcripts and an isolated oMLX endpoint with a separate dense
+`claude-sonnet-5` classifier. The measured paged-prefix cache reused nearly
+all prior classifier context on growing requests. Rapid remains the rollback
+lane; classifier verdict-quality comparison remains separate qualification
+work.
+
 
 **The `0.13.8` "verified" claim is withdrawn.** Auto Mode worked for roughly the first two hours of a
 real session on 2026-09-05 and then failed permanently — about 40 consecutive refusals reading
