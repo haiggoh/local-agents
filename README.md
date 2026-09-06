@@ -61,16 +61,25 @@ to this machine's default (`LA_DEFAULT_MLX_BACKEND`):
 difference between an interactive local session being usable and not. Two consequences worth
 knowing:
 
-- **Concurrency is a real capability, but it is deliberately switched off here.** Rapid has a
-  genuine continuous-batching scheduler (`--max-num-seqs`, its own default 256), unlike vllm-mlx's
-  single-slot engine. This stack still runs it at **1** (`LA_RAPID_MAX_NUM_SEQS`), because the
-  binding constraint is Metal memory, not the scheduler: one long-context session already measured
-  99.9 GB at 103,020 prompt tokens against a 103.9 GB limit, with seven `SIGABRT`s in ~22h. Each
-  extra in-flight sequence carries its own KV working set, so raising this multiplies what is
-  already saturating. Effect today: a dispatch to a busy session's server **queues** behind the
-  turn (one running, one queued, a third gets 503). Running a session and a dispatch on the same
-  model at the same time is better served by a **second instance on another port** — 27B 4-bit
-  weights are ~16 GB, so two instances fit where two long contexts do not.
+- **Concurrency is a real capability, and it is held at exactly 2 — no more.** Rapid has a genuine
+  continuous-batching scheduler (`--max-num-seqs`, its own default 256), unlike vllm-mlx's
+  single-slot engine. This stack runs it at **2** (`LA_RAPID_MAX_NUM_SEQS`), raised from 1 in
+  `0.13.8` for one specific reason: locally routed Auto Mode needs a free slot for its safety
+  classifier, or the classifier queues behind the turn that triggered it and times out.
+
+  **That raised the default without retiring the memory problem**, which is the part not to lose.
+  The binding constraint is still Metal memory, not the scheduler: one long-context session
+  measured 99.9 GB at 103,020 prompt tokens against a 103.9 GB limit, with seven `SIGABRT`s in
+  ~22h, and each extra in-flight sequence carries its own KV working set. The justification for the
+  second slot is that a classifier request is *small and short-lived* — measured 35,154 prompt
+  tokens for an 8-token verdict at `max_tokens=64` — **not** that the ceiling was re-measured for
+  two full-length concurrent sequences. It was not, and two long sequences remain unqualified;
+  `launch-local-auto-mode.sh` still checks wired memory before forcing the slot, and
+  `la-ram-preflight.sh`'s Rapid formula still models a single sequence.
+
+  So running a session and a *dispatch* on the same model at once is still better served by a
+  **second instance on another port** — 27B 4-bit weights are ~16 GB, so two instances fit where
+  two long contexts do not.
 - **GGUF is unaffected.** `llama_cpp` is a per-model pin and is deliberately *not* reachable from a
   generic value, so flipping the MLX default can never reroute a GGUF model onto an engine that
   cannot load it. The loader warns if a GGUF-looking artifact resolves to an MLX backend.

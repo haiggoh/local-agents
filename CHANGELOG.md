@@ -6,50 +6,21 @@ The project began using Git tags after development was already underway and did 
 
 Where no Git tag exists, the release heading links directly to its release commit. Component versions—such as the terminal `local-agent-dispatch` version—remain independent unless explicitly identified as the plugin release version.
 
-## [0.13.8] — 2026-09-05
-
-Merged `feat/auto-mode-classifier-localhost-routing` into main.
-
-### Added
-
-- **Auto Mode with its safety classifier routed to the local backend.** Claude Code judges each
-  consequential tool call with a *separate* classifier, independent of the session model, so on a
-  cloud-routed session a rate-limit or an exhausted budget took Auto Mode away precisely when local
-  work had become the fallback. A local session already points `ANTHROPIC_BASE_URL` at its own
-  server, so the classifier request follows it: `bin/launch-local-auto-mode.sh` warms a server that
-  has a slot free for it and launches into `--permission-mode auto`, and `launch-claude-agent.sh`
-  honours `LA_AUTO_MODE=1` for the same effect on an ordinary launch.
-
-  Verified end-to-end on 2026-09-05: the local server logged
-  `request model='claude-sonnet-5' served by loaded engine='claude-opus-5'` — the classifier's own
-  model identity, answered by the loaded local engine — while the session held no connection to the
-  cloud gateway, and the judged action then executed. Routing is proven; **verdict quality is not**,
-  and a local model is still not Anthropic's classifier.
-
-- **CSL auto-mode toggle.** The picker now shows `a) auto-mode: ON/OFF` and defaults ON — because
-  the classifier is local, auto mode costs nothing and cannot be withdrawn by a cloud 429. Opt out
-  with `CSL_AUTO_MODE=0` or press `a` in the picker.
-
-- **Telemetry suppression default.** Local sessions now ship with `LA_TELEMETRY=0` by default,
-  disabling Statsig/Sentry reporting, update checks, and nonessential outbound traffic. Toggle with
-  `t` in the picker or `CSL_TELEMETRY=1`.
-
-- **`bin/launch-local-auto-mode.sh`** — the dedicated auto-mode launcher that warms a server slot
-  for the classifier before launching the session.
-
-### Changed
-
-- `bin/launch-claude-agent.sh` now honours `LA_AUTO_MODE=1` → `--permission-mode auto` with an
-  appended system prompt reminding the session of its mode.
-- `bin/local-llm-hotswap.sh` and `config/config-lib.sh` updated to support the classifier's
-  `--max-num-seqs=2` slot allocation.
-
 ## [Unreleased]
 
 Planned-but-unshipped *specification* work is tracked in **[`docs/ROADMAP.md`](docs/ROADMAP.md)**,
 not here: an empty heading was previously mistaken for "there is no unshipped spec", when in fact
 the whole `0.14.0` specification existed outside the repository. Code that has landed on `main` and
-is waiting for a release number does belong here, and is listed below.
+is waiting for a release number does belong here.
+
+Nothing is currently awaiting a release number: everything that had accumulated past `v0.13.7`
+shipped as `0.13.8` below. The portable-model-manifest specification lives on
+`feature/portable-model-manifests` and is **not** on `main`, so it is deliberately absent here.
+
+## [0.13.8] — 2026-09-05
+
+Merged `feat/auto-mode-classifier-localhost-routing` into `main` (fast-forward, so the history is
+linear and every commit is attributable).
 
 ### Added
 
@@ -86,6 +57,10 @@ is waiting for a release number does belong here, and is listed below.
   Scope is deliberately limited to Claude Code's own traffic — hooks the *user* has configured still
   run, in separate processes. Trade-off: the umbrella also disables `/design-sync`, Projects and the
   CLI update check, all irrelevant to a local session.
+- **`bin/launch-local-auto-mode.sh`** — the standalone auto-mode harness: it warms a server that has
+  a slot free for the classifier, launches straight into `--permission-mode auto`, and hands the
+  session a first action chosen to exercise the classifier, so a run either proves local routing or
+  fails closed. Opt-in via `JOYIA_LOCAL_AUTO_CLASSIFIER=1`; the `csl` toggle covers everyday use.
 - `tests/test_csl_menu.sh` sections 5–9, covering the auto-mode default, the `CSL_AUTO_MODE=0`
   opt-out, the telemetry default and its `CSL_TELEMETRY=1` opt-in, both `a`/`t` toggles, and in every
   case the value the launcher actually receives rather than the menu text that describes it.
@@ -111,10 +86,39 @@ is waiting for a release number does belong here, and is listed below.
   that classifier routing was unsolved. Those passages now describe locally routed Auto Mode, with
   its evidence and its limits, and `bin/launch-local-auto-mode.sh` is listed in the inventory instead
   of being undocumented.
+- `bin/local-llm-hotswap.sh` and `config/config-lib.sh` support the classifier's second
+  concurrency slot: `LA_RAPID_MAX_NUM_SEQS` defaults to `2`, and enabling auto mode sets
+  `LA_HOTSWAP_FORCE_FRESH=1` so a server left over from a single-slot launch is restarted rather
+  than reused.
 - **Argument passthrough now receives the same profile as an interactive choice.** `csl <alias>`
   previously `exec`ed the launcher *before* the config was loaded, so a model selected by argument
   silently got no profile while the same model chosen from the numbered menu got one. Passthrough
   still skips the picker and the watcher; it no longer skips the profile.
+
+### Fixed
+
+- **`tests/test_rapid_backend.sh`: three warmup assertions that had never passed, and a regressed
+  stub-server leak.** All three failures were faults in the harness, not the shipped script — the
+  worst kind, because they read as a warmup regression in `local-llm-hotswap.sh`. The stub never
+  wrote its warmup log: it is generated from a correctly *quoted* heredoc (its body is Python), but
+  one line inside read `WARMUP_LOG="$SB/..."`, so the file received the literal characters `$SB`;
+  `open()` raised, `do_POST` died before answering, and the probe read an empty reply and reported
+  `finish_reason=?`. The skip test asked for a skip nobody reads (`HOTSWAP_PREFLIGHT=0`, while the
+  code reads `LA_HOTSWAP_PREFLIGHT` — a wrong env-var name fails **open**, silently). And that
+  section could not start at all: it inherited the 8100–8102 range with every port already held by
+  an earlier test, so its hand-started stub died with *Address already in use*; it now has its own
+  8103–8105 range, and its stub binary is no longer copied one level too deep by
+  `cp -R src/.stub dst/.stub`, which nests when the destination already exists.
+
+  The stub leak that `0.13.5` records as fixed had **regressed**: a later section did
+  `STUB_PIDS="$!"` — a scalar assignment that discarded every pid the array held — and installed a
+  second `EXIT` trap that dropped the `reap_stale_stubs` sweep. `cleanup()` is now the only `EXIT`
+  trap, and the reaper matches *both* sandbox markers; matching only `la-rapid-test` had left the
+  warmup-skip sandbox's stub listening on 8103 after every run, swept by port but skipped by marker.
+
+  38 passed / 0 failed, verified twice consecutively with no listener left on 8100–8105.
+  Mutation-tested against the product rather than merely re-run: breaking `_preflight_warmup` fails
+  two assertions, breaking its skip guard fails one.
 
 ### Runtime direction — Ornith is no longer an experiment
 

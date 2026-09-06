@@ -31,11 +31,15 @@ profiles architecture and must not be spent on anything else, because a prematur
 make the gate list below unverifiable — a released `0.14.0` that meets only half its gates cannot be
 un-released. Patch-level bumps below it are the cost of keeping that guarantee.
 
-`main` currently carries **unreleased** work past the `0.13.7` tag: the per-model auto-compaction
-profiles described under `[Unreleased]` in `CHANGELOG.md`, joined by **locally routed Auto Mode** from
-`feat/auto-mode-classifier-localhost-routing` (verified 2026-09-05, documented in the same
-`[Unreleased]` section). That is landed code awaiting a release
-number, not specification — so it lives in the changelog, and only the sections below are specs.
+`0.13.8` released what had accumulated past `v0.13.7`: the per-model auto-compaction profiles and
+**locally routed Auto Mode** (verified 2026-09-05), plus the telemetry-off default for local sessions.
+`feat/auto-mode-classifier-localhost-routing` was merged fast-forward, so `main`'s history is linear
+and every commit stays attributable. `main` now carries **nothing** awaiting a release number.
+
+The portable-model-manifest specification (a self-describing `.local-model-manifest.json` beside each
+artifact's weights) lives on the branch `feature/portable-model-manifests` and is **not** on `main`,
+so it is deliberately absent from this file until it merges. Landed code awaiting a number belongs in
+the changelog; only the sections below are specs.
 
 ---
 
