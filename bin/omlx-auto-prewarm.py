@@ -39,6 +39,7 @@ import re
 import signal
 import socket
 import stat
+import subprocess
 import sys
 import tempfile
 import threading
@@ -640,6 +641,176 @@ def command_capture_proxy(args: argparse.Namespace) -> int:
     return 0
 
 
+
+def private_binary_log(path: Path):
+    ensure_private_directory(path.parent)
+    descriptor = os.open(
+        path,
+        os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+        0o600,
+    )
+    return os.fdopen(descriptor, "wb")
+
+
+def terminate_process_group(
+    process: subprocess.Popen[Any],
+    grace_seconds: float = 5.0,
+) -> None:
+    if process.poll() is not None:
+        return
+
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+
+    try:
+        process.wait(timeout=grace_seconds)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+
+    try:
+        process.wait(timeout=grace_seconds)
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            f"probe process group {process.pid} survived SIGKILL"
+        ) from exc
+
+
+def command_capture_run(args: argparse.Namespace) -> int:
+    backend = urllib.parse.urlparse(args.backend_url)
+    if backend.scheme not in {"http", "https"} or not backend.hostname:
+        raise RuntimeError("backend URL must be http:// or https://")
+
+    command = list(args.probe_command)
+    if command and command[0] == "--":
+        command = command[1:]
+    if not command:
+        raise RuntimeError("capture-run requires a probe command after --")
+
+    fixture_path = canonical(args.fixture)
+    ready_path = canonical(args.ready_file)
+    probe_log = canonical(args.probe_log)
+    cwd = canonical(args.cwd)
+
+    if not cwd.is_dir():
+        raise RuntimeError(f"probe working directory missing: {cwd}")
+
+    ensure_private_directory(fixture_path.parent)
+    ensure_private_directory(ready_path.parent)
+    ensure_private_directory(probe_log.parent)
+
+    state = CaptureState(
+        backend=backend,
+        fixture_path=fixture_path,
+        ready_path=ready_path,
+        classifier_model_id=args.classifier_model_id,
+        max_body_bytes=args.max_body_bytes,
+    )
+
+    server = ThreadingHTTPServer(
+        (args.listen_host, args.listen_port),
+        make_handler(state),
+    )
+    server.daemon_threads = True
+
+    server_thread = threading.Thread(
+        target=server.serve_forever,
+        kwargs={"poll_interval": 0.1},
+        daemon=True,
+    )
+    server_thread.start()
+
+    actual_host, actual_port = server.server_address[:2]
+    proxy_url = f"http://{actual_host}:{actual_port}"
+
+    environment = os.environ.copy()
+    environment["ANTHROPIC_BASE_URL"] = proxy_url
+    environment["ANTHROPIC_AUTH_TOKEN"] = args.auth_token
+
+    for assignment in args.env:
+        if "=" not in assignment:
+            raise RuntimeError(
+                f"capture-run environment value must be NAME=VALUE: {assignment}"
+            )
+        name, value = assignment.split("=", 1)
+        if not name:
+            raise RuntimeError("capture-run environment name cannot be empty")
+        environment[name] = value
+
+    process: subprocess.Popen[Any] | None = None
+    error: str | None = None
+    captured = False
+    started = time.monotonic()
+
+    try:
+        with private_binary_log(probe_log) as log_handle:
+            process = subprocess.Popen(
+                command,
+                cwd=str(cwd),
+                env=environment,
+                stdin=subprocess.DEVNULL,
+                stdout=log_handle,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+
+            deadline = started + args.timeout
+
+            while True:
+                if state.captured.is_set():
+                    captured = True
+                    break
+
+                exit_code = process.poll()
+                if exit_code is not None:
+                    error = f"probe_exited_before_capture:{exit_code}"
+                    break
+
+                if time.monotonic() >= deadline:
+                    error = "capture_timeout"
+                    break
+
+                time.sleep(0.05)
+
+            terminate_process_group(
+                process,
+                grace_seconds=args.terminate_grace,
+            )
+    finally:
+        server.shutdown()
+        server.server_close()
+        server_thread.join(timeout=5)
+
+        if process is not None:
+            terminate_process_group(
+                process,
+                grace_seconds=args.terminate_grace,
+            )
+
+    elapsed = time.monotonic() - started
+
+    if state.error:
+        error = state.error
+
+    result = {
+        "schema_version": SCHEMA_VERSION,
+        "status": "captured" if captured and not error else "error",
+        "fixture": str(fixture_path),
+        "probe_log": str(probe_log),
+        "elapsed_seconds": round(elapsed, 3),
+        "error": error,
+    }
+
+    print(json.dumps(result, sort_keys=True))
+    return 0 if result["status"] == "captured" else 1
+
 def load_fixture(path: Path) -> tuple[str, dict[str, str], bytes]:
     fixture = read_json(path)
 
@@ -753,6 +924,67 @@ def replay_fixture(
     }
 
 
+def evaluate_replay_result(
+    result: dict[str, Any],
+    *,
+    min_prompt_tokens: int = 0,
+    min_cached_tokens: int = 0,
+    min_reuse_percent: float = 0,
+    max_elapsed_seconds: float = 0,
+) -> dict[str, Any]:
+    reasons: list[str] = []
+
+    if result.get("status") != "ok":
+        reasons.append("http_request_failed")
+
+    prompt = result.get("prompt_tokens")
+    cached = result.get("cached_tokens")
+    elapsed = result.get("elapsed_seconds")
+
+    reuse_percent: float | None = None
+    if (
+        isinstance(prompt, int)
+        and prompt > 0
+        and isinstance(cached, int)
+        and cached >= 0
+    ):
+        reuse_percent = cached * 100.0 / prompt
+
+    if min_prompt_tokens > 0:
+        if not isinstance(prompt, int):
+            reasons.append("prompt_tokens_unavailable")
+        elif prompt < min_prompt_tokens:
+            reasons.append("prompt_too_small")
+
+    if min_cached_tokens > 0:
+        if not isinstance(cached, int):
+            reasons.append("cached_tokens_unavailable")
+        elif cached < min_cached_tokens:
+            reasons.append("cached_tokens_too_small")
+
+    if min_reuse_percent > 0:
+        if reuse_percent is None:
+            reasons.append("reuse_percent_unavailable")
+        elif reuse_percent < min_reuse_percent:
+            reasons.append("reuse_percent_too_small")
+
+    if max_elapsed_seconds > 0:
+        if not isinstance(elapsed, (int, float)):
+            reasons.append("elapsed_time_unavailable")
+        elif elapsed > max_elapsed_seconds:
+            reasons.append("verification_too_slow")
+
+    result = dict(result)
+    result["reuse_percent"] = (
+        round(reuse_percent, 3)
+        if reuse_percent is not None
+        else None
+    )
+    result["accepted"] = not reasons
+    result["rejection_reasons"] = reasons
+    return result
+
+
 def command_replay(args: argparse.Namespace) -> int:
     result = replay_fixture(
         fixture_path=canonical(args.fixture),
@@ -761,11 +993,19 @@ def command_replay(args: argparse.Namespace) -> int:
         server_log=canonical(args.server_log) if args.server_log else None,
     )
 
+    result = evaluate_replay_result(
+        result,
+        min_prompt_tokens=args.min_prompt_tokens,
+        min_cached_tokens=args.min_cached_tokens,
+        min_reuse_percent=args.min_reuse_percent,
+        max_elapsed_seconds=args.max_elapsed_seconds,
+    )
+
     if args.output:
         atomic_private_json(canonical(args.output), result)
 
     print(json.dumps(result, sort_keys=True))
-    return 0 if result["status"] == "ok" else 1
+    return 0 if result["accepted"] else 1
 
 
 def command_mark_ready(args: argparse.Namespace) -> int:
@@ -800,6 +1040,66 @@ def command_mark_ready(args: argparse.Namespace) -> int:
     print(json.dumps({"status": "ready", "fingerprint": args.fingerprint}))
     return 0
 
+
+
+def command_mark_verified(args: argparse.Namespace) -> int:
+    fixture_dir = canonical(args.fixture_dir)
+    ready_path = fixture_dir / "ready.json"
+
+    if not ready_path.is_file():
+        raise RuntimeError(f"ready metadata missing: {ready_path}")
+
+    ready = read_json(ready_path)
+
+    if ready.get("schema_version") != SCHEMA_VERSION:
+        raise RuntimeError("ready metadata schema mismatch")
+    if ready.get("fingerprint") != args.fingerprint:
+        raise RuntimeError("ready metadata fingerprint mismatch")
+    if ready.get("success") is not True:
+        raise RuntimeError("cannot verify a fixture not marked successful")
+
+    previous_created_at = ready.get("created_at")
+    previous_refresh = ready.get("last_full_refresh")
+    launch_count = ready.get("launch_count", 0)
+
+    if not isinstance(launch_count, int) or launch_count < 0:
+        launch_count = 0
+
+    ready["last_fast_verification"] = time.time()
+    ready["last_success"] = time.time()
+    ready["launch_count"] = launch_count + 1
+
+    if args.prompt_tokens >= 0:
+        ready["last_prompt_tokens"] = args.prompt_tokens
+    if args.cached_tokens >= 0:
+        ready["last_cached_tokens"] = args.cached_tokens
+    if args.elapsed_seconds >= 0:
+        ready["last_elapsed_seconds"] = args.elapsed_seconds
+
+    # Fast verification must not reset fixture age. Weekly expiry remains
+    # anchored to the genuine full refresh.
+    ready["created_at"] = previous_created_at
+    ready["last_full_refresh"] = previous_refresh
+
+    atomic_private_json(ready_path, ready)
+
+    unhealthy = fixture_dir / "unhealthy.json"
+    try:
+        unhealthy.unlink()
+    except FileNotFoundError:
+        pass
+
+    print(
+        json.dumps(
+            {
+                "status": "verified",
+                "fingerprint": args.fingerprint,
+                "launch_count": ready["launch_count"],
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
 
 def command_mark_unhealthy(args: argparse.Namespace) -> int:
     fixture_dir = canonical(args.fixture_dir)
@@ -857,12 +1157,36 @@ def parser() -> argparse.ArgumentParser:
     capture.add_argument("--max-body-bytes", type=int, default=32 * 1024 * 1024)
     capture.set_defaults(function=command_capture_proxy)
 
+    capture_run = subparsers.add_parser("capture-run")
+    capture_run.add_argument("--backend-url", required=True)
+    capture_run.add_argument("--listen-host", default="127.0.0.1")
+    capture_run.add_argument("--listen-port", type=int, default=0)
+    capture_run.add_argument("--fixture", required=True)
+    capture_run.add_argument("--ready-file", required=True)
+    capture_run.add_argument("--probe-log", required=True)
+    capture_run.add_argument("--cwd", required=True)
+    capture_run.add_argument(
+        "--classifier-model-id",
+        default=CLASSIFIER_MODEL_DEFAULT,
+    )
+    capture_run.add_argument("--timeout", type=float, default=180)
+    capture_run.add_argument("--terminate-grace", type=float, default=5)
+    capture_run.add_argument("--max-body-bytes", type=int, default=32 * 1024 * 1024)
+    capture_run.add_argument("--auth-token", default="local")
+    capture_run.add_argument("--env", action="append", default=[])
+    capture_run.add_argument("probe_command", nargs=argparse.REMAINDER)
+    capture_run.set_defaults(function=command_capture_run)
+
     replay = subparsers.add_parser("replay")
     replay.add_argument("--fixture", required=True)
     replay.add_argument("--backend-url", required=True)
     replay.add_argument("--timeout", type=float, default=300)
     replay.add_argument("--server-log")
     replay.add_argument("--output")
+    replay.add_argument("--min-prompt-tokens", type=int, default=0)
+    replay.add_argument("--min-cached-tokens", type=int, default=0)
+    replay.add_argument("--min-reuse-percent", type=float, default=0)
+    replay.add_argument("--max-elapsed-seconds", type=float, default=0)
     replay.set_defaults(function=command_replay)
 
     ready = subparsers.add_parser("mark-ready")
@@ -870,6 +1194,14 @@ def parser() -> argparse.ArgumentParser:
     ready.add_argument("--fingerprint", required=True)
     ready.add_argument("--launch-count", type=int, default=0)
     ready.set_defaults(function=command_mark_ready)
+
+    verified = subparsers.add_parser("mark-verified")
+    verified.add_argument("--fixture-dir", required=True)
+    verified.add_argument("--fingerprint", required=True)
+    verified.add_argument("--prompt-tokens", type=int, default=-1)
+    verified.add_argument("--cached-tokens", type=int, default=-1)
+    verified.add_argument("--elapsed-seconds", type=float, default=-1)
+    verified.set_defaults(function=command_mark_verified)
 
     unhealthy = subparsers.add_parser("mark-unhealthy")
     unhealthy.add_argument("--fixture-dir", required=True)

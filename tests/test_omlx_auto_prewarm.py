@@ -427,6 +427,209 @@ with tempfile.TemporaryDirectory(prefix="omlx-prewarm-test.") as raw_tmp:
         "detached replay preserves captured body",
     )
 
+
+
+    print("== replay acceptance thresholds ==")
+
+    accepted = helper.evaluate_replay_result(
+        {
+            "status": "ok",
+            "prompt_tokens": 15000,
+            "cached_tokens": 12000,
+            "elapsed_seconds": 9.5,
+        },
+        min_prompt_tokens=10000,
+        min_cached_tokens=8000,
+        min_reuse_percent=70,
+        max_elapsed_seconds=45,
+    )
+
+    check(
+        accepted["accepted"] is True,
+        "representative warm replay passes readiness thresholds",
+    )
+    check(
+        accepted["reuse_percent"] == 80.0,
+        "reuse percentage is calculated from cache evidence",
+    )
+
+    rejected = helper.evaluate_replay_result(
+        {
+            "status": "ok",
+            "prompt_tokens": 15000,
+            "cached_tokens": 118,
+            "elapsed_seconds": 60.0,
+        },
+        min_prompt_tokens=10000,
+        min_cached_tokens=8000,
+        min_reuse_percent=70,
+        max_elapsed_seconds=45,
+    )
+
+    check(
+        rejected["accepted"] is False,
+        "tiny prefix reuse fails closed",
+    )
+    check(
+        "cached_tokens_too_small" in rejected["rejection_reasons"],
+        "cache-token rejection is reported",
+    )
+    check(
+        "verification_too_slow" in rejected["rejection_reasons"],
+        "deadline-unsafe replay is rejected",
+    )
+
+    print("== fast verification metadata ==")
+
+    helper.atomic_private_json(
+        fixture_dir / "ready.json",
+        {
+            "schema_version": helper.SCHEMA_VERSION,
+            "fingerprint": first["fingerprint"],
+            "success": True,
+            "created_at": time.time() - 3600,
+            "last_full_refresh": time.time() - 3600,
+            "last_fast_verification": 0,
+            "launch_count": 2,
+        },
+    )
+
+    ready_before = helper.read_json(fixture_dir / "ready.json")
+
+    verified_args = type(
+        "VerifiedArgs",
+        (),
+        {
+            "fixture_dir": str(fixture_dir),
+            "fingerprint": first["fingerprint"],
+            "prompt_tokens": 15000,
+            "cached_tokens": 12000,
+            "elapsed_seconds": 9.5,
+        },
+    )()
+
+    verify_status = helper.command_mark_verified(verified_args)
+    ready_after = helper.read_json(fixture_dir / "ready.json")
+
+    check(
+        verify_status == 0,
+        "fast verification metadata update succeeds",
+    )
+    check(
+        ready_after["launch_count"] == 3,
+        "fast verification increments launch count",
+    )
+    check(
+        ready_after["created_at"] == ready_before["created_at"],
+        "fast verification does not reset weekly fixture age",
+    )
+    check(
+        ready_after["last_full_refresh"]
+        == ready_before["last_full_refresh"],
+        "fast verification preserves full-refresh timestamp",
+    )
+
+    print("== capture-run process ownership ==")
+
+    probe_client = tmp / "probe_client.py"
+    probe_client.write_text(
+        """
+import json
+import os
+import time
+import urllib.error
+import urllib.request
+
+body = json.dumps(
+    {
+        "model": "claude-sonnet-5",
+        "stream": False,
+        "tools": [],
+        "messages": [
+            {
+                "role": "user",
+                "content": "<transcript>capture-run probe</transcript>",
+            }
+        ],
+        "max_tokens": 64,
+    }
+).encode()
+
+request = urllib.request.Request(
+    os.environ["ANTHROPIC_BASE_URL"] + "/v1/messages",
+    data=body,
+    method="POST",
+    headers={
+        "Content-Type": "application/json",
+        "Anthropic-Version": "2023-06-01",
+    },
+)
+
+try:
+    urllib.request.urlopen(request, timeout=10).read()
+except urllib.error.HTTPError:
+    pass
+
+time.sleep(60)
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    capture_run_dir = tmp / "capture-run"
+    capture_run_fixture = capture_run_dir / "classifier-request.json"
+    capture_run_ready = capture_run_dir / "capture-ready.json"
+    capture_run_log = capture_run_dir / "probe.log"
+
+    capture_run = subprocess.run(
+        [
+            sys.executable,
+            str(HELPER_PATH),
+            "capture-run",
+            "--backend-url",
+            backend_url,
+            "--fixture",
+            str(capture_run_fixture),
+            "--ready-file",
+            str(capture_run_ready),
+            "--probe-log",
+            str(capture_run_log),
+            "--cwd",
+            str(tmp),
+            "--timeout",
+            "10",
+            "--",
+            sys.executable,
+            str(probe_client),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+
+    check(
+        capture_run.returncode == 0,
+        "capture-run succeeds after genuine classifier capture",
+    )
+    check(
+        capture_run_fixture.is_file(),
+        "capture-run writes the private classifier fixture",
+    )
+    check(
+        stat.S_IMODE(capture_run_fixture.stat().st_mode) == 0o600,
+        "capture-run fixture is mode 0600",
+    )
+    check(
+        capture_run_log.is_file()
+        and stat.S_IMODE(capture_run_log.stat().st_mode) == 0o600,
+        "sacrificial probe output is private",
+    )
+
+    capture_run_result = json.loads(capture_run.stdout)
+    check(
+        capture_run_result["status"] == "captured",
+        "capture-run reports captured status",
+    )
+
     backend_server.shutdown()
     backend_server.server_close()
 
