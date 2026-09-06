@@ -56,6 +56,26 @@ fi
 #   LA_AUTO_MODE_SEGMENTED_TRANSCRIPT=0
 la_configure_auto_mode_env "$LA_AUTO_MODE" || exit 2
 
+# oMLX is the preferred local Auto Mode runtime when explicitly selected.
+# It serves the session and classifier as different model IDs on one endpoint,
+# and its paged prefix cache has demonstrated near-complete reuse of growing
+# classifier transcripts. Rapid remains available with:
+#   LA_AUTO_MODE_RUNTIME=rapid
+: "${LA_AUTO_MODE_RUNTIME:=rapid}"
+case "$LA_AUTO_MODE_RUNTIME" in
+    rapid) ;;
+    omlx)
+        if [ "$LA_AUTO_MODE" = "1" ]; then
+            exec "$LAUNCH_DIR/launch-claude-agent-omlx.sh" \
+                "$MODEL_ALIAS" "$EFFORT_OVERRIDE"
+        fi
+        ;;
+    *)
+        echo "ERROR: LA_AUTO_MODE_RUNTIME must be rapid or omlx" >&2
+        exit 2
+        ;;
+esac
+
 if [ "$LA_AUTO_MODE" = "1" ]; then
     # Keep the configured second slot for compatibility, but do not mistake it
     # for the long-context fix: measured failing classifier calls were already

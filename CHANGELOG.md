@@ -8,6 +8,15 @@ Where no Git tag exists, the release heading links directly to its release commi
 
 ## [Unreleased]
 
+### Added
+
+- Add an opt-in oMLX backend for local Auto Mode. It serves the session and
+  dense classifier under separate Claude model IDs on one endpoint and uses
+  oMLX's persistent paged prefix cache. Acceptance evidence: 12,544 of 13,856
+  tokens and 13,824 of 15,004 tokens reused on growing classifier-style
+  requests; latency fell from 75.8 seconds cold to 9.7 and 8.6 seconds.
+
+
 Planned-but-unshipped *specification* work is tracked in **[`docs/ROADMAP.md`](docs/ROADMAP.md)**,
 not here: an empty heading was previously mistaken for "there is no unshipped spec", when in fact
 the whole `0.14.0` specification existed outside the repository. Code that has landed on `main` and

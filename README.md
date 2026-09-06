@@ -964,3 +964,27 @@ layer and launcher conventions as everything else here; splitting it out would m
 second copy of that infrastructure and letting the two drift. Nothing in the plugin points at it, it
 receives no support, and it may be removed. Details and the honest status:
 [`docs/local-copilot-byok/COPILOT-BYOK-README.md`](docs/local-copilot-byok/COPILOT-BYOK-README.md).
+
+### oMLX Auto Mode backend
+
+For long local Auto Mode sessions, oMLX is available as an opt-in backend:
+
+```bash
+LA_AUTO_MODE_RUNTIME=omlx \
+LA_OMLX_CLASSIFIER_MODEL_DIR=/path/to/a/dense-classifier \
+  ./bin/launch-claude-agent.sh <session-alias>
+```
+
+The launcher exposes the selected session model under its configured Claude
+compatibility ID and exposes a separate dense model as `claude-sonnet-5`.
+Both are served by one isolated oMLX endpoint, without a request proxy.
+
+Why this exists: Rapid correctly routed classifier requests locally, but the
+tested dense Rapid path reused only 118 prefix tokens. In the equivalent oMLX
+test, a 13,856-token growing request reused 12,544 tokens, and a 15,004-token
+request reused 13,824. Measured latency fell from 75.8 seconds cold to 9.7 and
+8.6 seconds on the growing requests.
+
+The cache is persistent under
+`~/.cache/local-agents/omlx-auto` by default. Set
+`LA_AUTO_MODE_RUNTIME=rapid` to retain the existing Rapid path.
