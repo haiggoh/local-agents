@@ -861,20 +861,124 @@ def read_log_evidence(path: Path, offset: int) -> dict[str, int | None]:
     }
 
 
+def directory_size_bytes(root: Path) -> int:
+    """Return total regular-file bytes below a cache directory."""
+    if not root.exists():
+        return 0
+
+    total = 0
+    for path in root.rglob("*"):
+        try:
+            if path.is_file():
+                total += path.stat().st_size
+        except OSError:
+            continue
+    return total
+
+
+def settled_directory_size(
+    root: Path,
+    timeout: float,
+) -> int:
+    """Wait briefly for asynchronous cache writes to settle."""
+    deadline = time.monotonic() + max(0.0, timeout)
+    started = time.monotonic()
+    previous: int | None = None
+    stable_samples = 0
+    current = directory_size_bytes(root)
+
+    while True:
+        current = directory_size_bytes(root)
+
+        if current == previous:
+            stable_samples += 1
+        else:
+            previous = current
+            stable_samples = 0
+
+        elapsed = time.monotonic() - started
+        if elapsed >= 1.0 and stable_samples >= 3:
+            return current
+
+        if time.monotonic() >= deadline:
+            return current
+
+        time.sleep(0.25)
+
+
+def classifier_response_contract(
+    response_body: bytes,
+) -> dict[str, Any]:
+    """Validate the minimal Anthropic classifier response contract."""
+    try:
+        parsed = json.loads(response_body)
+    except Exception:
+        return {
+            "response_json": False,
+            "response_type": None,
+            "classifier_contract_valid": False,
+        }
+
+    response_type = (
+        parsed.get("type")
+        if isinstance(parsed, dict)
+        else None
+    )
+
+    texts: list[str] = []
+
+    if isinstance(parsed, dict):
+        content = parsed.get("content")
+        if isinstance(content, list):
+            for block in content:
+                if (
+                    isinstance(block, dict)
+                    and block.get("type") == "text"
+                    and isinstance(block.get("text"), str)
+                ):
+                    texts.append(block["text"])
+
+    joined = "\n".join(texts)
+
+    # Construct the delimiters rather than embedding renderer-sensitive
+    # literal control-like markup in surrounding documentation.
+    left = chr(60)
+    right = chr(62)
+
+    valid_contract = any(
+        (
+            f"{left}{name}{right}" in joined
+            and f"{left}/{name}{right}" in joined
+        )
+        for name in ("severity", "block")
+    )
+
+    return {
+        "response_json": True,
+        "response_type": response_type,
+        "classifier_contract_valid": valid_contract,
+    }
+
+
 def replay_fixture(
     *,
     fixture_path: Path,
     backend_url: str,
     timeout: float,
     server_log: Path | None,
+    cache_dir: Path | None = None,
+    cache_settle_timeout: float = 0,
 ) -> dict[str, Any]:
     request_path, headers, body = load_fixture(fixture_path)
-    backend = urllib.parse.urlparse(backend_url)
     url = backend_url.rstrip("/") + request_path
 
     log_offset = 0
     if server_log and server_log.is_file():
         log_offset = server_log.stat().st_size
+
+    cache_before: int | None = None
+    if cache_dir is not None:
+        cache_before = directory_size_bytes(cache_dir)
 
     request = urllib.request.Request(
         url,
@@ -888,38 +992,54 @@ def replay_fixture(
     response_body = b""
 
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with urllib.request.urlopen(
+            request,
+            timeout=timeout,
+        ) as response:
             response_status = response.status
             response_body = response.read()
     except urllib.error.HTTPError as exc:
         response_status = exc.code
         response_body = exc.read()
+
     elapsed = time.monotonic() - started
+
+    cache_after: int | None = None
+    cache_delta: int | None = None
+
+    if cache_dir is not None:
+        cache_after = settled_directory_size(
+            cache_dir,
+            cache_settle_timeout,
+        )
+        cache_delta = cache_after - (cache_before or 0)
 
     evidence = (
         read_log_evidence(server_log, log_offset)
         if server_log
-        else {"cached_tokens": None, "prompt_tokens": None}
+        else {
+            "cached_tokens": None,
+            "prompt_tokens": None,
+        }
     )
 
-    valid_json = False
-    response_type = None
-    try:
-        parsed = json.loads(response_body)
-        valid_json = True
-        response_type = parsed.get("type") if isinstance(parsed, dict) else None
-    except Exception:
-        pass
+    contract = classifier_response_contract(response_body)
 
     return {
         "schema_version": SCHEMA_VERSION,
-        "status": "ok" if response_status and 200 <= response_status < 300 else "error",
+        "status": (
+            "ok"
+            if response_status and 200 <= response_status < 300
+            else "error"
+        ),
         "http_status": response_status,
         "elapsed_seconds": round(elapsed, 3),
         "fixture_body_bytes": len(body),
         "fixture_body_sha256": sha256_bytes(body),
-        "response_json": valid_json,
-        "response_type": response_type,
+        "cache_dir_bytes_before": cache_before,
+        "cache_dir_bytes_after": cache_after,
+        "cache_dir_bytes_delta": cache_delta,
+        **contract,
         **evidence,
     }
 
@@ -936,6 +1056,13 @@ def evaluate_replay_result(
 
     if result.get("status") != "ok":
         reasons.append("http_request_failed")
+
+    if result.get("response_json") is not True:
+        reasons.append("response_not_json")
+    elif result.get("response_type") != "message":
+        reasons.append("response_not_anthropic_message")
+    elif result.get("classifier_contract_valid") is not True:
+        reasons.append("classifier_contract_invalid")
 
     prompt = result.get("prompt_tokens")
     cached = result.get("cached_tokens")
@@ -991,6 +1118,8 @@ def command_replay(args: argparse.Namespace) -> int:
         backend_url=args.backend_url,
         timeout=args.timeout,
         server_log=canonical(args.server_log) if args.server_log else None,
+        cache_dir=canonical(args.cache_dir) if args.cache_dir else None,
+        cache_settle_timeout=args.cache_settle_timeout,
     )
 
     result = evaluate_replay_result(
@@ -1182,6 +1311,8 @@ def parser() -> argparse.ArgumentParser:
     replay.add_argument("--backend-url", required=True)
     replay.add_argument("--timeout", type=float, default=300)
     replay.add_argument("--server-log")
+    replay.add_argument("--cache-dir")
+    replay.add_argument("--cache-settle-timeout", type=float, default=0)
     replay.add_argument("--output")
     replay.add_argument("--min-prompt-tokens", type=int, default=0)
     replay.add_argument("--min-cached-tokens", type=int, default=0)

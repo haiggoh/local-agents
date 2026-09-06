@@ -42,6 +42,7 @@ def check(condition: bool, label: str) -> None:
 
 class BackendHandler(BaseHTTPRequestHandler):
     requests: list[dict] = []
+    cache_growth_path: Path | None = None
 
     def log_message(self, _format, *_args):
         return
@@ -57,6 +58,12 @@ class BackendHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         length = int(self.headers.get("Content-Length", "0"))
         body = self.rfile.read(length)
+
+        growth_path = type(self).cache_growth_path
+        if growth_path is not None:
+            with growth_path.open("ab") as handle:
+                handle.write(b"x" * 4096)
+
         type(self).requests.append(
             {
                 "path": self.path,
@@ -429,11 +436,44 @@ with tempfile.TemporaryDirectory(prefix="omlx-prewarm-test.") as raw_tmp:
 
 
 
+    print("== isolated replay cache-growth observation ==")
+
+    cache_measure_dir = tmp / "cache-measure"
+    cache_measure_dir.mkdir()
+    cache_measure_file = cache_measure_dir / "blocks.bin"
+    cache_measure_file.write_bytes(b"seed")
+
+    BackendHandler.cache_growth_path = cache_measure_file
+
+    measured_replay = helper.replay_fixture(
+        fixture_path=fixture_path,
+        backend_url=backend_url,
+        timeout=5,
+        server_log=None,
+        cache_dir=cache_measure_dir,
+        cache_settle_timeout=1.5,
+    )
+
+    BackendHandler.cache_growth_path = None
+
+    check(
+        measured_replay["cache_dir_bytes_delta"] == 4096,
+        "isolated replay reports net shared-cache growth",
+    )
+    check(
+        measured_replay["cache_dir_bytes_after"]
+        > measured_replay["cache_dir_bytes_before"],
+        "shared-cache measurement records before and after sizes",
+    )
+
     print("== replay acceptance thresholds ==")
 
     accepted = helper.evaluate_replay_result(
         {
             "status": "ok",
+            "response_json": True,
+            "response_type": "message",
+            "classifier_contract_valid": True,
             "prompt_tokens": 15000,
             "cached_tokens": 12000,
             "elapsed_seconds": 9.5,
@@ -456,6 +496,9 @@ with tempfile.TemporaryDirectory(prefix="omlx-prewarm-test.") as raw_tmp:
     rejected = helper.evaluate_replay_result(
         {
             "status": "ok",
+            "response_json": True,
+            "response_type": "message",
+            "classifier_contract_valid": True,
             "prompt_tokens": 15000,
             "cached_tokens": 118,
             "elapsed_seconds": 60.0,
@@ -477,6 +520,28 @@ with tempfile.TemporaryDirectory(prefix="omlx-prewarm-test.") as raw_tmp:
     check(
         "verification_too_slow" in rejected["rejection_reasons"],
         "deadline-unsafe replay is rejected",
+    )
+
+    invalid_contract = helper.evaluate_replay_result(
+        {
+            "status": "ok",
+            "response_json": True,
+            "response_type": "message",
+            "classifier_contract_valid": False,
+            "prompt_tokens": 15000,
+            "cached_tokens": 12000,
+            "elapsed_seconds": 9.5,
+        },
+    )
+
+    check(
+        invalid_contract["accepted"] is False,
+        "invalid classifier response contract fails closed",
+    )
+    check(
+        "classifier_contract_invalid"
+        in invalid_contract["rejection_reasons"],
+        "classifier contract rejection is reported",
     )
 
     print("== fast verification metadata ==")
