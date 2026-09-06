@@ -117,6 +117,7 @@ runtime_root="$(
 )"
 runtime_root="$(cd -P "$runtime_root" && /bin/pwd -P)"
 
+base_root="$runtime_root/base"
 model_root="$runtime_root/models"
 session_view="$model_root/$SESSION_MODEL_ID"
 classifier_view="$model_root/$LA_OMLX_CLASSIFIER_MODEL_ID"
@@ -126,6 +127,7 @@ log_dir="$HOME/.claude/logs"
 server_log="$log_dir/omlx_${LA_OMLX_PORT}.log"
 
 mkdir -p \
+    "$base_root" \
     "$session_view" \
     "$classifier_view" \
     "$cache_root" \
@@ -187,7 +189,9 @@ cleanup() {
 trap cleanup EXIT INT TERM HUP
 
 "$LA_OMLX_BIN" serve \
+    --base-path "$base_root" \
     --model-dir "$model_root" \
+    --no-hf-cache \
     --host 127.0.0.1 \
     --port "$LA_OMLX_PORT" \
     --log-level info \

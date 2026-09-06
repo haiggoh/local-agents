@@ -38,6 +38,12 @@ check $? "persistent paged prefix cache is enabled"
 grep -qF -- '--hot-cache-write-through' "$LAUNCHER"
 check $? "hot cache writes through to persistent cache"
 
+grep -qF -- '--base-path "$base_root"' "$LAUNCHER"
+check $? "session server uses an isolated oMLX base path"
+
+grep -qF -- '--no-hf-cache' "$LAUNCHER"
+check $? "session server ignores unrelated Hugging Face cache models"
+
 grep -qF 'CLAUDE_CODE_AUTO_MODE_SEGMENTED_TRANSCRIPT=1' "$LAUNCHER"
 check $? "segmented transcript reaches Claude Code"
 
