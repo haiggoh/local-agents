@@ -45,8 +45,10 @@ _apply_session_profile() {
 
 # Auto-mode toggle state. When ON, the launcher runs `claude --permission-mode auto` instead of
 # `acceptEdits`, so every consequential Bash call is judged by the separate safety-classifier
-# routed to the local backend (same server, --max-num-seqs=2 gives it a slot). The toggle is
-# inherited by the launcher via LA_AUTO_MODE=1 and is not persisted to the parent shell.
+# routed to the selected local Auto Mode runtime. A verified cached
+# classifier fixture normally starts quickly; a first, expired, changed, or
+# unhealthy fixture requires a transparent cold refresh before Claude opens.
+# The toggle is inherited via LA_AUTO_MODE=1.
 #
 # Defaults ON since local classifier routing was verified end-to-end (2026-09-05): the local server
 # logged the classifier arriving as `model='claude-sonnet-5' ... served by loaded engine`, with no
@@ -55,10 +57,9 @@ _apply_session_profile() {
 # budget, which is the whole reason a local session exists. Turn it off with `a`, or set
 # CSL_AUTO_MODE=0 to opt out by default.
 #
-# Cost of the default, so it is chosen knowingly: a consequential call that is NOT already covered
-# by a permissions allowlist entry pays one extra local request (measured 27s for a 35k-token
-# classifier prompt on a cold cache). Allowlisted and read-only calls never reach the classifier at
-# all, so ordinary work is unaffected.
+# Startup behavior is explicit: cached classifier readiness is fast; a
+# genuine cold refresh can take several minutes and shows elapsed progress.
+# Auto Mode OFF skips classifier loading, capture, replay, and verification.
 AUTO_MODE="${CSL_AUTO_MODE:-1}"
 
 # Telemetry state. OFF by default: the point of a local session is that the work stays on this
@@ -160,8 +161,8 @@ while :; do
   echo "  c) choose a listed model × custom effort"
   if [ "$WATCH" = "1" ]; then echo "  w) watcher: ON  — opens a window following this session (toggle)"
   else                        echo "  w) watcher: OFF — no monitor window (toggle)"; fi
-  if [ "$AUTO_MODE" = "1" ]; then echo "  a) auto-mode: ON  — classifier judges every consequential Bash call (toggle)"
-  else                           echo "  a) auto-mode: OFF — acceptEdits (edits auto-apply, tools prompt) (toggle)"; fi
+  if [ "$AUTO_MODE" = "1" ]; then echo "  a) auto-mode: ON  — cached startup is quick; cold refresh may take several minutes (toggle)"
+  else                           echo "  a) auto-mode: OFF — acceptEdits; classifier startup skipped (toggle)"; fi
   if [ "$TELEMETRY" = "1" ]; then echo "  t) telemetry: ON  — stock Claude Code reporting/update checks (toggle)"
   else                            echo "  t) telemetry: OFF — no nonessential outbound traffic (toggle)"; fi
   echo "  q) quit"

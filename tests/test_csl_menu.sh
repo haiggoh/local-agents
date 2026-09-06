@@ -101,7 +101,7 @@ assert_no_grep 'Recommended pairings' "$out" \
   'role recommendations no longer replace the model list'
 assert_grep 'watcher: OFF' "$out" 'watcher defaults off'
 assert_no_grep 'watcher: ON' "$out" 'watcher is not enabled implicitly'
-assert_grep 'auto-mode: ON' "$out" 'auto mode defaults on (local classifier is free)'
+assert_grep 'auto-mode: ON  — cached startup is quick; cold refresh may take several minutes' "$out"   'auto mode default explains cached and cold startup'
 assert_no_grep 'auto-mode: OFF' "$out" 'auto mode is not silently disabled'
 assert_grep 'telemetry: OFF' "$out" 'telemetry defaults off (a local session stays local)'
 assert_no_grep 'telemetry: ON' "$out" 'telemetry is not silently enabled'
@@ -140,7 +140,7 @@ out="$(
     CSL_TEST_RESULT="$SB/auto-off-result" \
       bash "$SB/bin/csl" 2>&1
 )"
-assert_grep 'auto-mode: OFF' "$out" 'CSL_AUTO_MODE=0 opts out by default'
+assert_grep 'auto-mode: OFF — acceptEdits; classifier startup skipped' "$out"   'CSL_AUTO_MODE=0 visibly skips classifier startup'
 assert_no_grep 'auto-mode: ON' "$out" 'the opt-out is not overridden by the new default'
 
 echo "== 6. the launcher RECEIVES the auto-mode default, not just the menu text =="
