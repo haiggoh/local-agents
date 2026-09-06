@@ -4,6 +4,8 @@ set -uo pipefail
 HERE="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd -P "$HERE/.." && pwd)"
 LAUNCHER="$REPO/bin/launch-claude-agent-omlx.sh"
+GATE="$REPO/bin/omlx-auto-prewarm-gate.sh"
+PROGRESS="$REPO/bin/omlx-progress.sh"
 MAIN="$REPO/bin/launch-claude-agent.sh"
 
 PASS=0
@@ -53,6 +55,39 @@ check $? "Claude Code is routed to the isolated oMLX endpoint"
 grep -qF 'LA_OMLX_DRY_RUN' "$LAUNCHER"
 check $? "integration can be validated without starting a server"
 
+grep -qF 'omlx-progress.sh' "$LAUNCHER"
+check $? "oMLX launcher loads the progress component"
+
+grep -qF 'omlx-auto-prewarm-gate.sh' "$LAUNCHER"
+check $? "oMLX launcher loads the readiness gate"
+
+grep -qF 'la_omlx_prewarm_prepare' "$LAUNCHER"
+check $? "launcher fingerprints the private classifier fixture"
+
+grep -qF 'la_omlx_warm_session_model' "$LAUNCHER"
+check $? "launcher loads the session engine before Claude opens"
+
+grep -qF 'la_omlx_readiness_gate' "$LAUNCHER"
+check $? "launcher fails closed through classifier readiness"
+
+grep -qF 'LA_OMLX_CACHE_MAX_SIZE:=100GB' "$LAUNCHER"
+check $? "shared cache ceiling remains 100GB"
+
+grep -qF 'LA_OMLX_SHARED_CACHE_DIR' "$LAUNCHER"
+check $? "one-process oMLX cache is labeled shared"
+
+grep -qF 'verification-request.json' "$GATE"
+check $? "full refresh captures a second genuine classifier request"
+
+grep -qF 'Verifying genuine follow-up request and cache reuse' "$GATE"
+check $? "full refresh verifies genuine request B"
+
+grep -qF -- '--cache-dir "$LA_OMLX_PREWARM_SHARED_CACHE_DIR"' "$GATE"
+check $? "cold classifier replay measures shared-cache growth"
+
+grep -qF -- '--log-level debug' "$LAUNCHER"
+check $? "oMLX debug log exposes cache evidence"
+
 echo "== real dry-run behavior with a sandboxed registry =="
 
 SB="$(mktemp -d "${TMPDIR:-/tmp}/la-omlx-dry-run.XXXXXX")"
@@ -65,6 +100,8 @@ mkdir -p \
     "$SB/home/.models/ClassifierModel"
 
 cp "$LAUNCHER" "$SB/bin/launch-claude-agent-omlx.sh"
+cp "$GATE" "$SB/bin/omlx-auto-prewarm-gate.sh"
+cp "$PROGRESS" "$SB/bin/omlx-progress.sh"
 cp "$REPO/config/config-lib.sh" "$SB/config/config-lib.sh"
 
 printf '{}\n' > "$SB/home/.models/SessionModel/config.json"

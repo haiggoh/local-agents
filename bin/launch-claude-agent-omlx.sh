@@ -27,6 +27,10 @@ fi
 # shellcheck source=/dev/null
 . "$LAUNCH_DIR/../config/config-lib.sh"
 la_load_config || exit 1
+# shellcheck source=/dev/null
+. "$LAUNCH_DIR/omlx-progress.sh"
+# shellcheck source=/dev/null
+. "$LAUNCH_DIR/omlx-auto-prewarm-gate.sh"
 
 MODEL_ALIAS="${1:-}"
 EFFORT_OVERRIDE="${2:-}"
@@ -47,6 +51,11 @@ EFFORT="${EFFORT_OVERRIDE:-$LA_CUR_EFFORT}"
 : "${LA_OMLX_CACHE_ROOT:=$HOME/.cache/local-agents/omlx-auto}"
 : "${LA_OMLX_CACHE_MAX_SIZE:=100GB}"
 : "${LA_OMLX_HOT_CACHE_MAX_SIZE:=8GB}"
+
+# oMLX 0.6.4 exposes one process-wide paged-cache path. Main-session and
+# classifier KV blocks share this directory and its existing 100 GB ceiling.
+: "${LA_OMLX_SHARED_CACHE_DIR:=$LA_OMLX_CACHE_ROOT/$LA_OMLX_CLASSIFIER_MODEL_ID}"
+
 : "${LA_OMLX_MEMORY_GUARD:=balanced}"
 : "${LA_OMLX_MAX_CONCURRENT_REQUESTS:=2}"
 : "${LA_OMLX_KEEP_RUNTIME_VIEW:=0}"
@@ -112,6 +121,8 @@ then
     exit 2
 fi
 
+la_omlx_prewarm_prepare || exit 2
+
 runtime_root="$(
     mktemp -d "${TMPDIR:-/tmp}/local-agents-omlx-auto.XXXXXX"
 )"
@@ -122,7 +133,7 @@ model_root="$runtime_root/models"
 session_view="$model_root/$SESSION_MODEL_ID"
 classifier_view="$model_root/$LA_OMLX_CLASSIFIER_MODEL_ID"
 
-cache_root="$LA_OMLX_CACHE_ROOT/$LA_OMLX_CLASSIFIER_MODEL_ID"
+cache_root="$LA_OMLX_SHARED_CACHE_DIR"
 log_dir="$HOME/.claude/logs"
 server_log="$log_dir/omlx_${LA_OMLX_PORT}.log"
 
@@ -188,13 +199,16 @@ cleanup() {
 
 trap cleanup EXIT INT TERM HUP
 
+la_progress_init
+la_progress_stage "Starting isolated oMLX server"
+
 "$LA_OMLX_BIN" serve \
     --base-path "$base_root" \
     --model-dir "$model_root" \
     --no-hf-cache \
     --host 127.0.0.1 \
     --port "$LA_OMLX_PORT" \
-    --log-level info \
+    --log-level debug \
     --sse-keepalive-mode chunk \
     --max-concurrent-requests "$LA_OMLX_MAX_CONCURRENT_REQUESTS" \
     --memory-guard "$LA_OMLX_MEMORY_GUARD" \
@@ -209,6 +223,8 @@ omlx_pid=$!
 
 ready=0
 for _ in $(seq 1 120); do
+    la_progress_tick "Discovering session and classifier models"
+
     if ! kill -0 "$omlx_pid" 2>/dev/null; then
         tail -120 "$server_log" >&2 || true
         echo "ERROR: oMLX server exited during startup" >&2
@@ -255,6 +271,8 @@ done
     exit 1
 }
 
+la_progress_success "oMLX advertised both model IDs"
+
 export ANTHROPIC_BASE_URL="http://127.0.0.1:$LA_OMLX_PORT"
 export ANTHROPIC_AUTH_TOKEN="${ANTHROPIC_AUTH_TOKEN:-local}"
 export CLAUDE_IS_LOCAL=true
@@ -266,6 +284,18 @@ export DISABLE_AUTOUPDATER=1
 export API_TIMEOUT_MS="${LA_API_TIMEOUT_MS:-1800000}"
 export API_FORCE_IDLE_TIMEOUT=0
 export CLAUDE_ENABLE_STREAM_WATCHDOG=0
+
+if ! la_omlx_warm_session_model "$ANTHROPIC_BASE_URL"; then
+    printf '%s\n'         "ERROR: Local session model did not become ready."         "       Claude Code was not started."         "       Log: $server_log" >&2
+    exit 1
+fi
+
+if ! la_omlx_readiness_gate "$ANTHROPIC_BASE_URL"; then
+    printf '%s\n'         "ERROR: Local Auto Mode classifier was not ready."         "       Claude Code was not started because fallback would be unsafe."         "       Log: $server_log" >&2
+    exit 1
+fi
+
+la_progress_success "Local Auto Mode ready — opening Claude Code"
 
 claude_args=(
     --model "$SESSION_MODEL_ID"
@@ -293,7 +323,26 @@ printf '%s\n' \
     "   session:    $MODEL_ALIAS as $SESSION_MODEL_ID" \
     "   classifier: $LA_OMLX_CLASSIFIER_MODEL_ID" \
     "   endpoint:   $ANTHROPIC_BASE_URL" \
-    "   cache:      $cache_root" \
+    "   shared cache: $cache_root" \
     "   log:        $server_log"
 
-claude "${claude_args[@]}"
+session_log_offset=0
+
+if [ -f "$server_log" ]; then
+    session_log_offset="$(
+        wc -c <"$server_log" |
+            tr -d ' '
+    )"
+fi
+
+session_status=0
+
+if claude "${claude_args[@]}"; then
+    session_status=0
+else
+    session_status=$?
+fi
+
+la_omlx_record_session_health     "$server_log"     "${session_log_offset:-0}"
+
+exit "$session_status"

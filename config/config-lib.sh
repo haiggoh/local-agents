@@ -337,6 +337,22 @@ la_load_config() {
   # weights are ~16 GB, so two instances fit where two long contexts do not.
   : "${LA_RAPID_MAX_NUM_SEQS:=2}"
   : "${LA_RAPID_MAX_CONCURRENT_REQUESTS:=2}"
+
+  # oMLX Auto Mode readiness policy. Exact request fixtures refresh weekly,
+  # after Claude/oMLX/profile identity changes, or after a detected classifier
+  # failure. Every Auto Mode launch performs a fast replay verification.
+  : "${LA_OMLX_AUTO_PREWARM:=1}"
+  : "${LA_OMLX_PREWARM_FIXTURE_ROOT:=$HOME/.cache/local-agents/omlx-auto-fixtures}"
+  : "${LA_OMLX_PREWARM_MAX_AGE_DAYS:=7}"
+  : "${LA_OMLX_PREWARM_REFRESH_EVERY:=0}"
+  : "${LA_OMLX_PREWARM_CAPTURE_TIMEOUT_S:=900}"
+  : "${LA_OMLX_PREWARM_COLD_TIMEOUT_S:=600}"
+  : "${LA_OMLX_PREWARM_VERIFY_TIMEOUT_S:=45}"
+  : "${LA_OMLX_SESSION_WARM_TIMEOUT_S:=600}"
+  : "${LA_OMLX_PREWARM_MIN_PROMPT_TOKENS:=10000}"
+  : "${LA_OMLX_PREWARM_MIN_CACHED_TOKENS:=8000}"
+  : "${LA_OMLX_PREWARM_MIN_REUSE_PERCENT:=70}"
+  : "${LA_OMLX_PREWARM_PROGRESS_INTERVAL_S:=15}"
   # Optional per-machine extras a user may want the agent prompt to know about (all optional):
   : "${LA_MEMORY_DIR:=}"          # absolute path to your auto-memory dir, if you want the agent told
   : "${LA_COUNCIL_NOTE:=}"        # optional extra line appended to the agent prompt (e.g. a council rule)
