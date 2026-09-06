@@ -473,3 +473,31 @@ la_aliases_help() {
     done
   fi
 }
+
+# Configure Claude Code's Auto Mode transcript representation for one local
+# launch. The installed client reads CLAUDE_CODE_AUTO_MODE_SEGMENTED_TRANSCRIPT.
+# Segmenting does not guarantee a cache hit; it gives the backend stable,
+# message-aligned boundaries that a correct prefix cache can exploit.
+#
+# LA_AUTO_MODE_SEGMENTED_TRANSCRIPT:
+#   1 (default) — enable for Auto Mode
+#   0           — disable for this launch
+la_configure_auto_mode_env() {
+  local auto_mode="${1:-0}"
+
+  : "${LA_AUTO_MODE_SEGMENTED_TRANSCRIPT:=${CLAUDE_CODE_AUTO_MODE_SEGMENTED_TRANSCRIPT:-1}}"
+
+  case "$LA_AUTO_MODE_SEGMENTED_TRANSCRIPT" in
+    0|1) ;;
+    *)
+      echo "ERROR: LA_AUTO_MODE_SEGMENTED_TRANSCRIPT must be 0 or 1" >&2
+      return 2
+      ;;
+  esac
+
+  if [ "$auto_mode" = "1" ]; then
+    export CLAUDE_CODE_AUTO_MODE_SEGMENTED_TRANSCRIPT="$LA_AUTO_MODE_SEGMENTED_TRANSCRIPT"
+  else
+    unset CLAUDE_CODE_AUTO_MODE_SEGMENTED_TRANSCRIPT
+  fi
+}

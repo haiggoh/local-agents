@@ -48,7 +48,18 @@ if [ "${1:-}" = "--auto" ]; then
     exec "$LAUNCH_DIR/launch-local-auto-mode.sh" "${@:2}"
 fi
 : "${LA_AUTO_MODE:=0}"
+
+# Give repeated classifier calls message-aligned transcript blocks so a backend
+# with a trimmable prefix cache can reuse the stable history and prefill only
+# the newly appended delta. This is local-launch scoped, defaults on only for
+# Auto Mode, and can be disabled for one launch with:
+#   LA_AUTO_MODE_SEGMENTED_TRANSCRIPT=0
+la_configure_auto_mode_env "$LA_AUTO_MODE" || exit 2
+
 if [ "$LA_AUTO_MODE" = "1" ]; then
+    # Keep the configured second slot for compatibility, but do not mistake it
+    # for the long-context fix: measured failing classifier calls were already
+    # admitted with running=1 waiting=0. Their failure was prefill latency.
     : "${LA_HOTSWAP_FORCE_FRESH:=1}"
 fi
 
@@ -403,9 +414,10 @@ for _la_old in "$HOME"/.claude/logs/local-agents-session-*.transcript "$HOME"/.c
 done
 
 # --permission-mode: auto when LA_AUTO_MODE=1 (set by the CSL toggle), acceptEdits otherwise.
-# In auto mode every consequential Bash call is judged by the SEPARATE classifier, which is
-# pointed at the warmed local backend (same server, --max-num-seqs=2 gives it a slot), so a
-# cloud 429 / budget-limit can't force the acceptEdits fallback.
+# In Auto Mode, unresolved consequential calls are judged by the separate classifier.
+# The classifier follows the local Anthropic endpoint. Segmented transcripts are enabled
+# above so repeated long-context decisions can expose stable cache boundaries; routing
+# locally is not itself proof that the backend reuses those boundaries.
 if [ "$LA_AUTO_MODE" = "1" ]; then
     _PERM_MODE="auto"
     _AUTO_MODE_APPEND="You are running in LOCAL auto mode with a local safety-classifier backend."
