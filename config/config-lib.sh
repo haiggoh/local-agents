@@ -61,7 +61,7 @@ LA_MLX_BACKENDS="rapid vllm mlx_lm"
 # --- model registry storage (populated by la_register in the config file) ----
 # Parallel arrays keyed by insertion; la_lookup fills LA_* vars for a given alias.
 LA_ALIASES=()
-declare -A LA_SUBDIR LA_SERVE LA_SERVE_DECLARED LA_TOOLP LA_REASONP LA_THINK LA_SPOOF LA_EFFORT LA_ROLES LA_REPO LA_SIZE
+declare -A LA_SUBDIR LA_SERVE LA_SERVE_DECLARED LA_TOOLP LA_REASONP LA_THINK LA_SPOOF LA_EFFORT LA_ROLES LA_REPO LA_SIZE LA_QUALIFICATION
 # Optional per-alias Claude Code auto-compaction overrides. csl applies
 # these only to the selected model's child launcher process.
 declare -A LA_SESSION_AUTO_COMPACT
@@ -75,6 +75,7 @@ declare -A LA_SESSION_AUTO_COMPACT
 #   hf_repo  Hugging Face repo id — lets the interactive installer download this model; "" = the
 #            installer won't manage it (you place the weights yourself).
 #   size_gb  approx download size, for the installer's disk/consent display; "" = unknown.
+#   qualification OPTIONAL registry status shown by csl; registered|experimental|qualified.
 # Called once per model from the config file.
 la_register() {
   local alias="$1"
@@ -86,6 +87,7 @@ la_register() {
   LA_TOOLP[$alias]="$4"
   LA_REASONP[$alias]="$5"; LA_THINK[$alias]="$6"; LA_SPOOF[$alias]="$7"; LA_EFFORT[$alias]="$8"
   LA_ROLES[$alias]="${9:-}"; LA_REPO[$alias]="${10:-}"; LA_SIZE[$alias]="${11:-}"
+  LA_QUALIFICATION[$alias]="${12:-registered}"
 }
 
 # --- retired aliases: a rename must not fail silently -------------------------

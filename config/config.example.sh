@@ -104,6 +104,7 @@ LA_COUNCIL_NOTE=""
 #   hf_repo          OPTIONAL Hugging Face repo id — lets the interactive installer download it.
 #                    OMIT to manage the weights yourself.
 #   size_gb          OPTIONAL approx download size (installer display / disk consent). OMIT if unknown.
+#   qualification    OPTIONAL csl status: registered|experimental|qualified. OMIT for registered.
 #
 # Fields are positional: to set a later optional field, pass "" for any earlier one you're skipping.
 # The examples below are the maintainer's mid-2026 M4-Max stack — REPLACE with your models. Note
