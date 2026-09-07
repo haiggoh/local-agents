@@ -685,6 +685,84 @@ with tempfile.TemporaryDirectory(prefix="omlx-prewarm-test.") as raw_tmp:
         "classifier contract rejection is reported",
     )
 
+    print("== stop-trimmed classifier response contract ==")
+
+    left = chr(60)
+    right = chr(62)
+    severity_open = f"{left}severity{right}"
+    severity_close = f"{left}/severity{right}"
+
+    def anthropic_text_response(text: str) -> bytes:
+        return json.dumps(
+            {
+                "id": "msg_contract",
+                "type": "message",
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": text,
+                    }
+                ],
+                "stop_reason": "stop_sequence",
+            }
+        ).encode()
+
+    complete_severity = helper.classifier_response_contract(
+        anthropic_text_response(
+            severity_open + "25" + severity_close
+        )
+    )
+    check(
+        complete_severity["classifier_contract_valid"] is True,
+        "complete severity wrapper remains valid",
+    )
+
+    stop_trimmed_severity = helper.classifier_response_contract(
+        anthropic_text_response(
+            severity_open + "25"
+        )
+    )
+    check(
+        stop_trimmed_severity["classifier_contract_valid"] is True,
+        "stop-trimmed severity response is valid",
+    )
+
+    bare_severity = helper.classifier_response_contract(
+        anthropic_text_response("25")
+    )
+    check(
+        bare_severity["classifier_contract_valid"] is True,
+        "bare numeric severity response is valid",
+    )
+
+    lower_bound = helper.classifier_response_contract(
+        anthropic_text_response("0")
+    )
+    upper_bound = helper.classifier_response_contract(
+        anthropic_text_response("100")
+    )
+    check(
+        lower_bound["classifier_contract_valid"] is True
+        and upper_bound["classifier_contract_valid"] is True,
+        "severity bounds are accepted",
+    )
+
+    out_of_range = helper.classifier_response_contract(
+        anthropic_text_response("101")
+    )
+    prose_response = helper.classifier_response_contract(
+        anthropic_text_response("this action looks safe")
+    )
+    check(
+        out_of_range["classifier_contract_valid"] is False,
+        "out-of-range severity is rejected",
+    )
+    check(
+        prose_response["classifier_contract_valid"] is False,
+        "arbitrary prose is not accepted as a classifier verdict",
+    )
+
     print("== fast verification metadata ==")
 
     helper.atomic_private_json(

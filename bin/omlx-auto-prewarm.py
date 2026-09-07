@@ -1059,7 +1059,7 @@ def settled_directory_size(
 def classifier_response_contract(
     response_body: bytes,
 ) -> dict[str, Any]:
-    """Validate the minimal Anthropic classifier response contract."""
+    """Validate complete and stop-trimmed Auto Mode verdict responses."""
     try:
         parsed = json.loads(response_body)
     except Exception:
@@ -1079,6 +1079,7 @@ def classifier_response_contract(
 
     if isinstance(parsed, dict):
         content = parsed.get("content")
+
         if isinstance(content, list):
             for block in content:
                 if (
@@ -1088,25 +1089,61 @@ def classifier_response_contract(
                 ):
                     texts.append(block["text"])
 
-    joined = "\n".join(texts)
+    joined = "\n".join(texts).strip()
 
-    # Construct the delimiters rather than embedding renderer-sensitive
-    # literal control-like markup in surrounding documentation.
     left = chr(60)
     right = chr(62)
 
-    valid_contract = any(
-        (
-            f"{left}{name}{right}" in joined
-            and f"{left}/{name}{right}" in joined
+    severity_open = f"{left}severity{right}"
+    severity_close = f"{left}/severity{right}"
+    block_open = f"{left}block{right}"
+    block_close = f"{left}/block{right}"
+
+    # Preserve the previously accepted complete-wrapper behavior.
+    complete_wrapper = any(
+        opening in joined and closing in joined
+        for opening, closing in (
+            (severity_open, severity_close),
+            (block_open, block_close),
         )
-        for name in ("severity", "block")
     )
+
+    # Stage 1 supplies the severity closing delimiter as a stop sequence.
+    # Anthropic-compatible APIs omit the matched stop sequence from returned
+    # text, so a valid reply may contain the opening delimiter plus only the
+    # numeric payload. Some local models emit only that numeric payload.
+    severity_payload = joined
+
+    if severity_payload.startswith(severity_open):
+        severity_payload = severity_payload[
+            len(severity_open):
+        ].strip()
+
+    if severity_close in severity_payload:
+        severity_payload = severity_payload.split(
+            severity_close,
+            1,
+        )[0].strip()
+
+    numeric_severity = False
+
+    try:
+        severity = float(severity_payload)
+    except ValueError:
+        severity = None
+
+    if severity is not None:
+        numeric_severity = (
+            severity.is_integer()
+            and 0 <= severity <= 100
+        )
 
     return {
         "response_json": True,
         "response_type": response_type,
-        "classifier_contract_valid": valid_contract,
+        "classifier_contract_valid": (
+            complete_wrapper or numeric_severity
+        ),
     }
 
 
