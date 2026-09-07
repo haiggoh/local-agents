@@ -542,6 +542,13 @@ def forward_request(
         connection.close()
 
 
+
+def is_anthropic_messages_path(raw_path: str) -> bool:
+    """Match the Messages route after removing query and fragment data."""
+    parsed_path = urllib.parse.urlsplit(raw_path).path.rstrip("/")
+    return parsed_path.endswith("/v1/messages")
+
+
 def make_handler(state: CaptureState) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         server_version = "local-agents-prewarm-capture/1"
@@ -570,9 +577,11 @@ def make_handler(state: CaptureState) -> type[BaseHTTPRequestHandler]:
 
             observation = None
 
+            # Record sanitized metadata for every uncaptured POST request.
+            # This keeps future path or request-shape mismatches diagnosable
+            # without persisting message content, headers, or credentials.
             if (
                 self.command == "POST"
-                and self.path.endswith("/v1/messages")
                 and not state.captured.is_set()
             ):
                 observation = classifier_request_observation(
@@ -598,7 +607,11 @@ def make_handler(state: CaptureState) -> type[BaseHTTPRequestHandler]:
                     )
                     return
 
-            if observation is not None and observation["matches"]:
+            if (
+                observation is not None
+                and is_anthropic_messages_path(self.path)
+                and observation["matches"]
+            ):
                 try:
                     write_capture_fixture(
                         state,

@@ -105,6 +105,32 @@ def wait_for(path: Path, timeout: float = 10) -> None:
     raise AssertionError(f"timed out waiting for {path}")
 
 
+print("== Anthropic Messages path normalization ==")
+
+check(
+    helper.is_anthropic_messages_path("/v1/messages"),
+    "plain Messages path is recognized",
+)
+check(
+    helper.is_anthropic_messages_path(
+        "/v1/messages?beta=true&source=side_query"
+    ),
+    "query-bearing Messages path is recognized",
+)
+check(
+    helper.is_anthropic_messages_path(
+        "/proxy/v1/messages/?beta=true"
+    ),
+    "prefixed and trailing-slash Messages path is recognized",
+)
+check(
+    not helper.is_anthropic_messages_path(
+        "/v1/messages/count_tokens?beta=true"
+    ),
+    "non-Messages route is rejected",
+)
+
+
 with tempfile.TemporaryDirectory(prefix="omlx-prewarm-test.") as raw_tmp:
     tmp = Path(raw_tmp).resolve()
 
