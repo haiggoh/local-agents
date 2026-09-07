@@ -308,40 +308,89 @@ def capture_headers(handler: BaseHTTPRequestHandler) -> dict[str, str]:
     return headers
 
 
-def is_classifier_request(body: bytes, model_id: str) -> bool:
+def classifier_request_observation(
+    body: bytes,
+    model_id: str,
+) -> dict[str, Any]:
+    """Return content-free request metadata and predicate rejection reasons."""
+    observation: dict[str, Any] = {
+        "body_bytes": len(body),
+        "expected_model": model_id,
+        "json_object": False,
+        "method_contract": "anthropic_messages",
+        "model": None,
+        "stream": None,
+        "max_tokens": None,
+        "messages_type": None,
+        "messages_count": None,
+        "tools_type": None,
+        "tools_count": None,
+        "matches": False,
+        "rejection_reasons": [],
+    }
+
+    reasons: list[str] = observation["rejection_reasons"]
+
     try:
         payload = json.loads(body)
     except Exception:
-        return False
+        reasons.append("invalid_json")
+        return observation
 
-    if payload.get("model") != model_id:
-        return False
+    if not isinstance(payload, dict):
+        reasons.append("json_not_object")
+        return observation
 
-    # Auto Mode classifier calls observed in Claude Code use non-streaming
-    # Anthropic Messages requests and carry no ordinary tools.
-    if payload.get("stream") not in (False, None):
-        return False
+    observation["json_object"] = True
+
+    requested_model = payload.get("model")
+    observation["model"] = (
+        requested_model
+        if isinstance(requested_model, str)
+        else type(requested_model).__name__
+    )
+
+    stream = payload.get("stream")
+    observation["stream"] = stream
+
+    max_tokens = payload.get("max_tokens")
+    observation["max_tokens"] = max_tokens
+
+    messages = payload.get("messages")
+    observation["messages_type"] = type(messages).__name__
+    if isinstance(messages, list):
+        observation["messages_count"] = len(messages)
 
     tools = payload.get("tools")
+    observation["tools_type"] = type(tools).__name__
+    if isinstance(tools, list):
+        observation["tools_count"] = len(tools)
+
+    if requested_model != model_id:
+        reasons.append("model_mismatch")
+
+    if stream not in (False, None):
+        reasons.append("streaming_request")
+
     if tools not in (None, []):
-        return False
+        reasons.append("tools_not_empty_list_or_null")
 
-    # Capture only the observed Stage-1 Auto Mode contract. Other Sonnet side
-    # queries may also be non-streaming and tool-free, so model name alone is
-    # not a sufficient safety boundary.
-    if payload.get("max_tokens") != 64:
-        return False
+    if max_tokens != 64:
+        reasons.append("max_tokens_not_64")
 
-    # Segmented Auto Mode sends transcript blocks as separate Anthropic
-    # messages rather than embedding one literal transcript envelope. During
-    # the dedicated sacrificial capture process, the observed Stage-1 shape is
-    # Sonnet, non-streaming, no ordinary tools, max_tokens=64, and at least two
-    # messages. One-message title and label side queries remain excluded.
-    messages = payload.get("messages")
-    if not isinstance(messages, list) or len(messages) < 2:
-        return False
+    if not isinstance(messages, list):
+        reasons.append("messages_not_list")
+    elif len(messages) < 2:
+        reasons.append("messages_count_below_2")
 
-    return True
+    observation["matches"] = not reasons
+    return observation
+
+
+def is_classifier_request(body: bytes, model_id: str) -> bool:
+    return bool(
+        classifier_request_observation(body, model_id)["matches"]
+    )
 
 
 class CaptureState:
@@ -353,15 +402,60 @@ class CaptureState:
         ready_path: Path,
         classifier_model_id: str,
         max_body_bytes: int,
+        observation_path: Path,
     ) -> None:
         self.backend = backend
         self.fixture_path = fixture_path
         self.ready_path = ready_path
         self.classifier_model_id = classifier_model_id
         self.max_body_bytes = max_body_bytes
+        self.observation_path = observation_path
         self.captured = threading.Event()
         self.error: str | None = None
         self.lock = threading.Lock()
+
+
+
+def append_capture_observation(
+    state: CaptureState,
+    *,
+    method: str,
+    path: str,
+    observation: dict[str, Any],
+) -> None:
+    """Append one private metadata-only request observation."""
+    ensure_private_directory(state.observation_path.parent)
+
+    record = {
+        "schema_version": SCHEMA_VERSION,
+        "recorded_at": time.time(),
+        "method": method,
+        "path": path,
+        **observation,
+    }
+
+    encoded = (
+        json.dumps(
+            record,
+            sort_keys=True,
+            ensure_ascii=False,
+        )
+        + "\n"
+    ).encode("utf-8")
+
+    with state.lock:
+        descriptor = os.open(
+            state.observation_path,
+            os.O_WRONLY | os.O_CREAT | os.O_APPEND,
+            0o600,
+        )
+
+        with os.fdopen(descriptor, "ab") as handle:
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+
+        os.chmod(state.observation_path, 0o600)
 
 
 def write_capture_fixture(
@@ -474,12 +568,37 @@ def make_handler(state: CaptureState) -> type[BaseHTTPRequestHandler]:
 
             body = self.rfile.read(length) if length else b""
 
+            observation = None
+
             if (
                 self.command == "POST"
                 and self.path.endswith("/v1/messages")
-                and is_classifier_request(body, state.classifier_model_id)
                 and not state.captured.is_set()
             ):
+                observation = classifier_request_observation(
+                    body,
+                    state.classifier_model_id,
+                )
+
+                try:
+                    append_capture_observation(
+                        state,
+                        method=self.command,
+                        path=self.path,
+                        observation=observation,
+                    )
+                except Exception as exc:
+                    state.error = (
+                        "observation_write_failed:"
+                        f"{type(exc).__name__}"
+                    )
+                    self.send_error(
+                        500,
+                        "sanitized request observation failed",
+                    )
+                    return
+
+            if observation is not None and observation["matches"]:
                 try:
                     write_capture_fixture(
                         state,
@@ -562,6 +681,10 @@ def command_capture_proxy(args: argparse.Namespace) -> int:
         ready_path=ready_path,
         classifier_model_id=args.classifier_model_id,
         max_body_bytes=args.max_body_bytes,
+        observation_path=(
+            fixture_path.parent
+            / "capture-observations.jsonl"
+        ),
     )
 
     server = ThreadingHTTPServer(
@@ -705,12 +828,26 @@ def command_capture_run(args: argparse.Namespace) -> int:
     ensure_private_directory(ready_path.parent)
     ensure_private_directory(probe_log.parent)
 
+    observation_path = (
+        fixture_path.parent
+        / "capture-observations.jsonl"
+    )
+
+    try:
+        observation_path.unlink()
+    except FileNotFoundError:
+        pass
+
     state = CaptureState(
         backend=backend,
         fixture_path=fixture_path,
         ready_path=ready_path,
         classifier_model_id=args.classifier_model_id,
         max_body_bytes=args.max_body_bytes,
+        observation_path=(
+            fixture_path.parent
+            / "capture-observations.jsonl"
+        ),
     )
 
     server = ThreadingHTTPServer(
@@ -803,6 +940,7 @@ def command_capture_run(args: argparse.Namespace) -> int:
         "status": "captured" if captured and not error else "error",
         "fixture": str(fixture_path),
         "probe_log": str(probe_log),
+        "observation_file": str(observation_path),
         "elapsed_seconds": round(elapsed, 3),
         "error": error,
     }

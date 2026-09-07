@@ -366,6 +366,56 @@ with tempfile.TemporaryDirectory(prefix="omlx-prewarm-test.") as raw_tmp:
     wait_for(fixture_path)
     wait_for(capture_ready)
 
+    observation_path = (
+        proxy_dir
+        / "capture-observations.jsonl"
+    )
+    wait_for(observation_path)
+
+    observation_lines = [
+        json.loads(line)
+        for line in observation_path.read_text(
+            encoding="utf-8"
+        ).splitlines()
+        if line.strip()
+    ]
+
+    check(
+        stat.S_IMODE(observation_path.stat().st_mode) == 0o600,
+        "sanitized observation file is mode 0600",
+    )
+    check(
+        any(
+            record.get("matches") is True
+            for record in observation_lines
+        ),
+        "proxy records a matching classifier observation",
+    )
+
+    forbidden_observation_keys = {
+        "headers",
+        "body",
+        "body_base64",
+        "messages",
+        "system",
+        "content",
+        "x-api-key",
+        "authorization",
+    }
+
+    observed_keys = {
+        str(key).lower()
+        for record in observation_lines
+        for key in record
+    }
+
+    check(
+        forbidden_observation_keys.isdisjoint(
+            observed_keys
+        ),
+        "sanitized observations contain no request content or credentials",
+    )
+
     check(classifier_status == 503,
           "first genuine classifier request is detached from backend")
     check(len(BackendHandler.requests) == 1,
@@ -422,6 +472,40 @@ with tempfile.TemporaryDirectory(prefix="omlx-prewarm-test.") as raw_tmp:
             "claude-sonnet-5",
         ),
         "segmented two-message classifier request is captured",
+    )
+
+    segmented_observation = (
+        helper.classifier_request_observation(
+            segmented_classifier,
+            "claude-sonnet-5",
+        )
+    )
+
+    check(
+        segmented_observation["matches"] is True,
+        "sanitized metadata marks segmented classifier as matching",
+    )
+    check(
+        segmented_observation["messages_count"] == 2,
+        "sanitized metadata records message count",
+    )
+    check(
+        segmented_observation["tools_type"] == "list"
+        and segmented_observation["tools_count"] == 0,
+        "sanitized metadata records empty tools shape",
+    )
+
+    lookalike_observation = (
+        helper.classifier_request_observation(
+            sonnet_lookalike,
+            "claude-sonnet-5",
+        )
+    )
+
+    check(
+        "messages_count_below_2"
+        in lookalike_observation["rejection_reasons"],
+        "sanitized metadata explains rejected side query",
     )
 
     captured = json.loads(fixture_path.read_text())
