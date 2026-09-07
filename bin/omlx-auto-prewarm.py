@@ -1113,8 +1113,9 @@ def classifier_response_contract(
     # text, so a valid reply may contain the opening delimiter plus only the
     # numeric payload. Some local models emit only that numeric payload.
     severity_payload = joined
+    has_severity_open = severity_payload.startswith(severity_open)
 
-    if severity_payload.startswith(severity_open):
+    if has_severity_open:
         severity_payload = severity_payload[
             len(severity_open):
         ].strip()
@@ -1134,7 +1135,8 @@ def classifier_response_contract(
 
     if severity is not None:
         numeric_severity = (
-            severity.is_integer()
+            has_severity_open
+            and severity.is_integer()
             and 0 <= severity <= 100
         )
 

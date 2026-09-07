@@ -732,35 +732,44 @@ with tempfile.TemporaryDirectory(prefix="omlx-prewarm-test.") as raw_tmp:
         anthropic_text_response("25")
     )
     check(
-        bare_severity["classifier_contract_valid"] is True,
-        "bare numeric severity response is valid",
+        bare_severity["classifier_contract_valid"] is False,
+        "bare numeric severity is rejected",
     )
 
     lower_bound = helper.classifier_response_contract(
-        anthropic_text_response("0")
+        anthropic_text_response(severity_open + "0")
     )
     upper_bound = helper.classifier_response_contract(
-        anthropic_text_response("100")
+        anthropic_text_response(severity_open + "100")
     )
     check(
         lower_bound["classifier_contract_valid"] is True
         and upper_bound["classifier_contract_valid"] is True,
-        "severity bounds are accepted",
+        "stop-trimmed wrapped severity bounds are accepted",
     )
 
     out_of_range = helper.classifier_response_contract(
-        anthropic_text_response("101")
+        anthropic_text_response(severity_open + "101")
     )
-    prose_response = helper.classifier_response_contract(
+    wrapped_prose = helper.classifier_response_contract(
+        anthropic_text_response(
+            severity_open + "this action looks safe"
+        )
+    )
+    bare_prose = helper.classifier_response_contract(
         anthropic_text_response("this action looks safe")
     )
     check(
         out_of_range["classifier_contract_valid"] is False,
-        "out-of-range severity is rejected",
+        "out-of-range wrapped severity is rejected",
     )
     check(
-        prose_response["classifier_contract_valid"] is False,
-        "arbitrary prose is not accepted as a classifier verdict",
+        wrapped_prose["classifier_contract_valid"] is False,
+        "wrapped prose is not accepted as a classifier verdict",
+    )
+    check(
+        bare_prose["classifier_contract_valid"] is False,
+        "bare prose is not accepted as a classifier verdict",
     )
 
     print("== fast verification metadata ==")
