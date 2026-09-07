@@ -332,14 +332,13 @@ def is_classifier_request(body: bytes, model_id: str) -> bool:
     if payload.get("max_tokens") != 64:
         return False
 
-    try:
-        serialized = body.decode("utf-8")
-    except UnicodeDecodeError:
-        return False
-
-    if "<transcript>" not in serialized:
-        return False
-    if "</transcript>" not in serialized:
+    # Segmented Auto Mode sends transcript blocks as separate Anthropic
+    # messages rather than embedding one literal transcript envelope. During
+    # the dedicated sacrificial capture process, the observed Stage-1 shape is
+    # Sonnet, non-streaming, no ordinary tools, max_tokens=64, and at least two
+    # messages. One-message title and label side queries remain excluded.
+    messages = payload.get("messages")
+    if not isinstance(messages, list) or len(messages) < 2:
         return False
 
     return True

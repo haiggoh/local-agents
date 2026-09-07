@@ -173,8 +173,12 @@ with tempfile.TemporaryDirectory(prefix="omlx-prewarm-test.") as raw_tmp:
             "messages": [
                 {
                     "role": "user",
-                    "content": "<transcript>classifier fixture</transcript>",
-                }
+                    "content": "stable classifier history",
+                },
+                {
+                    "role": "user",
+                    "content": "classify the proposed Bash action",
+                },
             ],
             "max_tokens": 64,
         }
@@ -391,6 +395,33 @@ with tempfile.TemporaryDirectory(prefix="omlx-prewarm-test.") as raw_tmp:
             "claude-sonnet-5",
         ),
         "unrelated Sonnet side query is not captured",
+    )
+
+    segmented_classifier = json.dumps(
+        {
+            "model": "claude-sonnet-5",
+            "stream": False,
+            "tools": [],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "segmented history block",
+                },
+                {
+                    "role": "user",
+                    "content": "proposed Bash action",
+                },
+            ],
+            "max_tokens": 64,
+        }
+    ).encode()
+
+    check(
+        helper.is_classifier_request(
+            segmented_classifier,
+            "claude-sonnet-5",
+        ),
+        "segmented two-message classifier request is captured",
     )
 
     captured = json.loads(fixture_path.read_text())
@@ -613,8 +644,12 @@ body = json.dumps(
         "messages": [
             {
                 "role": "user",
-                "content": "<transcript>capture-run probe</transcript>",
-            }
+                "content": "capture-run segmented history",
+            },
+            {
+                "role": "user",
+                "content": "capture-run proposed Bash action",
+            },
         ],
         "max_tokens": 64,
     }
@@ -671,27 +706,37 @@ time.sleep(60)
         timeout=20,
     )
 
+    capture_run_ok = capture_run.returncode == 0
+    fixture_exists = capture_run_fixture.is_file()
+    probe_log_exists = capture_run_log.is_file()
+
     check(
-        capture_run.returncode == 0,
+        capture_run_ok,
         "capture-run succeeds after genuine classifier capture",
     )
     check(
-        capture_run_fixture.is_file(),
+        fixture_exists,
         "capture-run writes the private classifier fixture",
     )
     check(
-        stat.S_IMODE(capture_run_fixture.stat().st_mode) == 0o600,
+        fixture_exists
+        and stat.S_IMODE(capture_run_fixture.stat().st_mode) == 0o600,
         "capture-run fixture is mode 0600",
     )
     check(
-        capture_run_log.is_file()
+        probe_log_exists
         and stat.S_IMODE(capture_run_log.stat().st_mode) == 0o600,
         "sacrificial probe output is private",
     )
 
-    capture_run_result = json.loads(capture_run.stdout)
+    try:
+        capture_run_result = json.loads(capture_run.stdout)
+    except (json.JSONDecodeError, TypeError):
+        capture_run_result = None
+
     check(
-        capture_run_result["status"] == "captured",
+        isinstance(capture_run_result, dict)
+        and capture_run_result.get("status") == "captured",
         "capture-run reports captured status",
     )
 
