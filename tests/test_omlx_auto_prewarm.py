@@ -721,7 +721,10 @@ with tempfile.TemporaryDirectory(prefix="omlx-prewarm-test.") as raw_tmp:
     stop_trimmed_severity = helper.classifier_response_contract(
         anthropic_text_response(
             severity_open + "25"
-        )
+        ),
+        request_body=json.dumps(
+            {"stop_sequences": [severity_close]}
+        ).encode(),
     )
     check(
         stop_trimmed_severity["classifier_contract_valid"] is True,
@@ -737,10 +740,16 @@ with tempfile.TemporaryDirectory(prefix="omlx-prewarm-test.") as raw_tmp:
     )
 
     lower_bound = helper.classifier_response_contract(
-        anthropic_text_response(severity_open + "0")
+        anthropic_text_response(severity_open + "0"),
+        request_body=json.dumps(
+            {"stop_sequences": [severity_close]}
+        ).encode(),
     )
     upper_bound = helper.classifier_response_contract(
-        anthropic_text_response(severity_open + "100")
+        anthropic_text_response(severity_open + "100"),
+        request_body=json.dumps(
+            {"stop_sequences": [severity_close]}
+        ).encode(),
     )
     check(
         lower_bound["classifier_contract_valid"] is True
@@ -770,6 +779,128 @@ with tempfile.TemporaryDirectory(prefix="omlx-prewarm-test.") as raw_tmp:
     check(
         bare_prose["classifier_contract_valid"] is False,
         "bare prose is not accepted as a classifier verdict",
+    )
+
+    print("== thinking-prefixed classifier response contract ==")
+
+    thinking_open = f"{left}thinking{right}"
+    thinking_close = f"{left}/thinking{right}"
+    block_open = f"{left}block{right}"
+    block_close = f"{left}/block{right}"
+    severity_request = json.dumps(
+        {"stop_sequences": [severity_close]}
+    ).encode()
+    block_request = json.dumps(
+        {"stop_sequences": [block_close]}
+    ).encode()
+
+    def contract_valid(
+        text: str,
+        request_body: bytes | None = None,
+    ) -> bool:
+        return (
+            helper.classifier_response_contract(
+                anthropic_text_response(text),
+                request_body=request_body,
+            )["classifier_contract_valid"]
+            is True
+        )
+
+    accepted_contracts = (
+        (
+            thinking_open
+            + "The action is safe."
+            + thinking_close
+            + severity_open
+            + "25"
+            + severity_close,
+            None,
+        ),
+        (
+            thinking_open
+            + "Multiline reasoning.\nSecond line."
+            + thinking_close
+            + "\n\n"
+            + severity_open
+            + "25",
+            severity_request,
+        ),
+        (block_open + "true" + block_close, None),
+        (block_open + "false" + block_close, None),
+        (
+            thinking_open
+            + "Evaluate the policy."
+            + thinking_close
+            + block_open
+            + "true"
+            + block_close,
+            None,
+        ),
+        (block_open + "true", block_request),
+    )
+
+    check(
+        all(
+            contract_valid(text, request_body)
+            for text, request_body in accepted_contracts
+        ),
+        "one complete leading thinking section preserves exact verdicts",
+    )
+
+    rejected_contracts = (
+        (thinking_open + "unclosed reasoning" + severity_open + "25", None),
+        (thinking_close + severity_open + "25" + severity_close, None),
+        (
+            thinking_open + "first" + thinking_close
+            + thinking_open + "second" + thinking_close
+            + severity_open + "25" + severity_close,
+            None,
+        ),
+        (
+            "prose before " + thinking_open + "reasoning" + thinking_close
+            + severity_open + "25" + severity_close,
+            None,
+        ),
+        (
+            thinking_open + "reasoning" + thinking_close
+            + "prose between " + severity_open + "25" + severity_close,
+            None,
+        ),
+        (
+            thinking_open + "reasoning" + thinking_close
+            + severity_open + "25" + severity_close + " trailing prose",
+            None,
+        ),
+        (
+            thinking_open + severity_open + "25" + severity_close
+            + thinking_close,
+            None,
+        ),
+        (
+            thinking_open + severity_open + "25" + severity_close
+            + thinking_close + severity_open + "25" + severity_close,
+            None,
+        ),
+        ("arbitrary " + severity_open + "25" + severity_close, None),
+        (severity_open + "25" + severity_close + " trailing prose", None),
+        (severity_open + "25" + severity_close + severity_close, None),
+        (block_open + "maybe" + block_close, None),
+        (block_open + "true" + block_close + " trailing prose", None),
+        (block_open + "true", None),
+        (severity_open + "25", None),
+        (severity_open + "25", block_request),
+        (block_open + "true", severity_request),
+        (severity_open + "101" + severity_close, None),
+        ("25", None),
+        ("true", None),
+    )
+
+    check(
+        all(
+            not contract_valid(text, request_body)
+            for text, request_body in rejected_contracts
+        ),
+        "malformed thinking, prose, and unauthorized trimming fail closed",
     )
 
     print("== fast verification metadata ==")

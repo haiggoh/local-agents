@@ -1056,10 +1056,79 @@ def settled_directory_size(
         time.sleep(0.25)
 
 
+def _classifier_verdict_after_optional_thinking(
+    text: str,
+) -> str | None:
+    """Return a verdict after at most one complete leading thinking section."""
+    value = text.strip()
+
+    left = chr(60)
+    right = chr(62)
+    thinking_open = f"{left}thinking{right}"
+    thinking_close = f"{left}/thinking{right}"
+
+    if not value.startswith(thinking_open):
+        if thinking_open in value or thinking_close in value:
+            return None
+        return value
+
+    remainder = value[len(thinking_open):]
+    closing_index = remainder.find(thinking_close)
+
+    if closing_index < 0:
+        return None
+
+    thinking_body = remainder[:closing_index]
+    verdict = remainder[closing_index + len(thinking_close):].strip()
+
+    verdict_markers = (
+        f"{left}severity{right}",
+        f"{left}/severity{right}",
+        f"{left}block{right}",
+        f"{left}/block{right}",
+    )
+
+    if (
+        thinking_open in thinking_body
+        or thinking_close in thinking_body
+        or any(marker in thinking_body for marker in verdict_markers)
+        or thinking_open in verdict
+        or thinking_close in verdict
+        or not verdict
+    ):
+        return None
+
+    return verdict
+
+
+def _request_allows_trimmed_closing(
+    request_body: bytes | None,
+    closing: str,
+) -> bool:
+    """Return whether the captured request names the closing stop sequence."""
+    if request_body is None:
+        return False
+
+    try:
+        request = json.loads(request_body)
+    except Exception:
+        return False
+
+    if not isinstance(request, dict):
+        return False
+
+    stop_sequences = request.get("stop_sequences")
+    return (
+        isinstance(stop_sequences, list)
+        and closing in stop_sequences
+    )
+
+
 def classifier_response_contract(
     response_body: bytes,
+    request_body: bytes | None = None,
 ) -> dict[str, Any]:
-    """Validate complete and stop-trimmed Auto Mode verdict responses."""
+    """Validate exact Auto Mode verdicts with optional leading thinking."""
     try:
         parsed = json.loads(response_body)
     except Exception:
@@ -1069,12 +1138,7 @@ def classifier_response_contract(
             "classifier_contract_valid": False,
         }
 
-    response_type = (
-        parsed.get("type")
-        if isinstance(parsed, dict)
-        else None
-    )
-
+    response_type = parsed.get("type") if isinstance(parsed, dict) else None
     texts: list[str] = []
 
     if isinstance(parsed, dict):
@@ -1089,63 +1153,71 @@ def classifier_response_contract(
                 ):
                     texts.append(block["text"])
 
-    joined = "\n".join(texts).strip()
-
-    left = chr(60)
-    right = chr(62)
-
-    severity_open = f"{left}severity{right}"
-    severity_close = f"{left}/severity{right}"
-    block_open = f"{left}block{right}"
-    block_close = f"{left}/block{right}"
-
-    # Preserve the previously accepted complete-wrapper behavior.
-    complete_wrapper = any(
-        opening in joined and closing in joined
-        for opening, closing in (
-            (severity_open, severity_close),
-            (block_open, block_close),
-        )
+    verdict = _classifier_verdict_after_optional_thinking(
+        "\n".join(texts)
     )
+    contract_valid = False
 
-    # Stage 1 supplies the severity closing delimiter as a stop sequence.
-    # Anthropic-compatible APIs omit the matched stop sequence from returned
-    # text, so a valid reply may contain the opening delimiter plus only the
-    # numeric payload. Some local models emit only that numeric payload.
-    severity_payload = joined
-    has_severity_open = severity_payload.startswith(severity_open)
+    if verdict is not None:
+        left = chr(60)
+        right = chr(62)
+        severity_open = f"{left}severity{right}"
+        severity_close = f"{left}/severity{right}"
+        block_open = f"{left}block{right}"
+        block_close = f"{left}/block{right}"
 
-    if has_severity_open:
-        severity_payload = severity_payload[
-            len(severity_open):
-        ].strip()
+        if verdict.startswith(severity_open):
+            payload = verdict[len(severity_open):].strip()
+            closing_count = payload.count(severity_close)
 
-    if severity_close in severity_payload:
-        severity_payload = severity_payload.split(
-            severity_close,
-            1,
-        )[0].strip()
+            if closing_count == 1:
+                payload, trailing = payload.split(severity_close, 1)
+                payload = payload.strip()
+                structural_match = not trailing.strip()
+            elif closing_count == 0:
+                structural_match = _request_allows_trimmed_closing(
+                    request_body,
+                    severity_close,
+                )
+            else:
+                structural_match = False
 
-    numeric_severity = False
+            try:
+                severity = float(payload)
+            except ValueError:
+                severity = None
 
-    try:
-        severity = float(severity_payload)
-    except ValueError:
-        severity = None
+            contract_valid = (
+                structural_match
+                and severity is not None
+                and severity.is_integer()
+                and 0 <= severity <= 100
+            )
 
-    if severity is not None:
-        numeric_severity = (
-            has_severity_open
-            and severity.is_integer()
-            and 0 <= severity <= 100
-        )
+        elif verdict.startswith(block_open):
+            payload = verdict[len(block_open):]
+            closing_count = payload.count(block_close)
+
+            if closing_count == 1:
+                payload, trailing = payload.split(block_close, 1)
+                structural_match = not trailing.strip()
+            elif closing_count == 0:
+                structural_match = _request_allows_trimmed_closing(
+                    request_body,
+                    block_close,
+                )
+            else:
+                structural_match = False
+
+            contract_valid = (
+                structural_match
+                and payload.strip().casefold() in {"true", "false"}
+            )
 
     return {
         "response_json": True,
         "response_type": response_type,
-        "classifier_contract_valid": (
-            complete_wrapper or numeric_severity
-        ),
+        "classifier_contract_valid": contract_valid,
     }
 
 
@@ -1212,7 +1284,10 @@ def replay_fixture(
         }
     )
 
-    contract = classifier_response_contract(response_body)
+    contract = classifier_response_contract(
+        response_body,
+        request_body=body,
+    )
 
     return {
         "schema_version": SCHEMA_VERSION,
