@@ -10,6 +10,24 @@ Where no Git tag exists, the release heading links directly to its release commi
 
 Nothing is currently awaiting a release number.
 
+## [0.13.10] — 2026-09-08
+
+### Fixed
+
+- Stop the companion watcher window stealing keyboard focus from the local
+  session. `local-watch.sh --open` used `activate`, which brought Terminal
+  forward, so the window you type into lost focus and had to be clicked back.
+  `do script` creates its window without it. Focus restoration is window-level
+  rather than app-level because the session is normally another Terminal
+  window, and is guarded for the case where no window exists yet.
+- Collapse repeating watcher output. Watcher windows now pipe engine health
+  through `bin/la-watch-filter.awk`, which strips the constant
+  `INFO:module.path:` logger prefix, prints the per-request banner once — the
+  model, `max_tokens` and stream flag are fixed for a session — and collapses
+  consecutive near-identical lines into one line plus a repeat count, matching
+  with digits masked so counters and timings still compare equal.
+  `--diagnostic` bypasses the filter, so the raw stream stays raw.
+
 ## [0.13.9] — 2026-09-06
 
 ### Added

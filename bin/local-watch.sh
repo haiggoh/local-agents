@@ -56,11 +56,18 @@ fi
 [ "$MODE" = "--list" ] && MODE="list"
 
 _health_cmd() {  # $1=port
+  # --diagnostic deliberately bypasses the readable renderer, so it must also bypass the dedupe
+  # filter -- otherwise "raw stream" would still be collapsed and the flag would lie.
+  local _filter=""
+  [ -z "${LA_WATCH_DIAGNOSTIC:-}" ] && _filter="| awk -f $BIN_DIR/la-watch-filter.awk"
   # Includes the KV-cache / prefill / throughput lines: for an OPERATOR (thinking off) these are the
   # substitute for watching reasoning. They tell you which phase a long turn is in — 'cache MISS' or
   # 'prefilling N new tokens' means it is still reading the prompt and has generated nothing yet,
   # while 'N tokens in Ts (X tok/s)' is the only place the real generation rate appears.
-  printf "tail -n0 -f %s/vllm_%s.log | grep --line-buffered -E '\\[REQUEST\\]|last user message preview|cache (HIT|MISS|SKIP)|prefilling|tokens in .*tok/s|CLEANUP done|TIMEOUT after|timed out|timeout|Error|Traceback|Killed|OOM|Exception|EngineBusy|CLIENT DISCONNECTED' | grep --line-buffered -vE 'disconnect_guard poll'\n" "$LOGDIR" "$1"
+  # Piped through la-watch-filter.awk, which strips the constant `INFO:module:` prefix, prints the
+  # fixed per-request banner once, and collapses consecutive repeats into a repeat count. Kept in a
+  # separate file because this string is escaped twice (printf, then osascript).
+  printf "tail -n0 -f %s/vllm_%s.log | grep --line-buffered -E '\\[REQUEST\\]|last user message preview|cache (HIT|MISS|SKIP)|prefilling|tokens in .*tok/s|CLEANUP done|TIMEOUT after|timed out|timeout|Error|Traceback|Killed|OOM|Exception|EngineBusy|CLIENT DISCONNECTED' | grep --line-buffered -vE 'disconnect_guard poll' %s\n" "$LOGDIR" "$1" "$_filter"
 }
 # Which transcript is a given local session actually writing? READ it, do not infer it.
 #
@@ -199,10 +206,23 @@ if [ "$MODE" = "--open" ]; then
     [ -z "$_port" ] && _port="$LA_PORT_START"
     _cmd="echo '=== local-watch: $_alias (pid $_pid, port $_port) ==='; $(_health_cmd "$_port")"
     [ -n "$_tr" ] && _cmd="$_cmd & $(_mut_cmd "$_tr"); wait"
+    # Spawn the watcher WITHOUT stealing focus: the user types into the SESSION, not the
+    # watcher. `do script` creates a window on its own -- `activate` was the only reason
+    # Terminal came forward. The session is usually another Terminal window, so restoring
+    # focus has to be window-level, not app-level: remember the front window id and put it
+    # back. Guarded because there may be no existing window on the very first spawn.
     osascript >/dev/null 2>&1 <<OSA
 tell application "Terminal"
-  activate
+  set _prev to missing value
+  try
+    set _prev to id of front window
+  end try
   do script "$(printf '%s' "$_cmd" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+  if _prev is not missing value then
+    try
+      set frontmost of window id _prev to true
+    end try
+  end if
 end tell
 OSA
     _n=$((_n+1))
