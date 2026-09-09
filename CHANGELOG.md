@@ -8,7 +8,32 @@ Where no Git tag exists, the release heading links directly to its release commi
 
 ## [Unreleased]
 
-Nothing is currently awaiting a release number.
+Awaiting a release number on branch `fix/omlx-classifier-prewarm`: the Auto Mode
+local-classifier readiness work. Not released because no live Claude Code smoke
+test has confirmed either backend's classifier route yet — startup success alone
+is not qualification.
+
+### Added
+
+- Auto Mode classifier readiness gate for local sessions. A private fixture
+  engine captures a genuine classifier request, measures cache readiness, and
+  every launch replays it before the session opens, so a local Auto Mode session
+  cannot start with a classifier that will fail on first use. Fixtures refresh
+  weekly, on Claude/backend/profile identity change, or after a detected
+  failure. Startup progress is reported transparently instead of appearing to
+  hang, and capture diagnostics are sanitized before they are recorded.
+- An opt-in Rapid-MLX Auto Mode launcher, deliberately NOT the default route.
+  One qualified engine carries both compatibility identities natively: the
+  relative model path stays the classifier identity while `--served-model-name`
+  exposes the session identity — no proxy and no persistent user alias. It keeps
+  its own cache and fixture roots, isolated from generic Rapid sessions and from
+  oMLX, behind `LA_RAPID_AUTO_*`.
+
+### Changed
+
+- The readiness gate is backend-neutral. The historical `LA_OMLX_*` names remain
+  the public compatibility surface, and the backend is recorded in the prewarm
+  profile so a fixture cannot be replayed across backends.
 
 ## [0.13.10] — 2026-09-08
 
