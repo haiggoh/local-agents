@@ -1,11 +1,30 @@
 #!/usr/bin/env bash
 # launch-claude-agent-rapid-auto.sh — local Claude Code Auto Mode via Rapid-MLX.
 #
-# One qualified Qwen3.6 process accepts both compatibility identities. Rapid
-# keeps the relative model path "claude-sonnet-5" while exposing
-# "claude-opus-5" via --served-model-name. This is the native dual-identity
-# route proven by the isolated preflight; no proxy or persistent user alias is
-# involved.
+# What IS proven: the native dual-identity route. One Rapid process accepts both
+# compatibility identities — the relative model path stays "claude-sonnet-5"
+# while --served-model-name exposes "claude-opus-5". No proxy and no persistent
+# user alias is involved. Claude Code needs a separate logical classifier
+# IDENTITY, not separate weights or a second process.
+#
+# What is NOT proven, and why this launcher is not the default route:
+# Qwen3.6 below is the model the dual-identity route was DEMONSTRATED on, not a
+# qualified classifier. It FAILED the production-critical changed-prefix reuse
+# gate: its hybrid cache reports non_trimmable=True, so Rapid refuses the cache
+# entry even at a 98.84% shared prefix (37,132 of 37,569 tokens) and recomputes
+# the whole prompt (~32.9s). Exact-request reuse is excellent; growing-prefix
+# reuse is unavailable. A live Auto Mode session grows its prefix every turn, so
+# that is the case that matters.
+#
+# Devstral Small 2 24B is the current leading candidate — dense/non-hybrid, so it
+# genuinely trims (98.86% reuse, LCP 37,808, 436 tokens re-prefilled), and it
+# passed genuine Stage 2 at 5/5 contract with 100% warm reuse under the 45s
+# deadline. It needs a Stage-1 adjacent-user-role adapter (Mistral alternation),
+# whose production correctness across other Mistral traffic is unproven.
+#
+# So the model pin below is deliberately NOT called qualified, and repointing it
+# is expected work — see tests/test_rapid_auto_mode.sh for the guards that keep
+# this route opt-in until a real end-to-end smoke test passes.
 set -euo pipefail
 umask 077
 
@@ -78,7 +97,7 @@ EFFORT="${EFFORT_OVERRIDE:-$LA_CUR_EFFORT}"
 : "${LA_RAPID_AUTO_DRY_RUN:=0}"
 
 [ -x "$LA_RAPID_AUTO_BIN" ] || {
-    echo "ERROR: qualified Rapid-MLX executable missing: $LA_RAPID_AUTO_BIN" >&2
+    echo "ERROR: pinned Rapid-MLX executable missing: $LA_RAPID_AUTO_BIN" >&2
     exit 2
 }
 
@@ -100,30 +119,32 @@ rapid_auto_model_dir="$(
 )"
 
 [ ! -L "$LA_RAPID_AUTO_MODEL_DIR" ] || {
-    echo "ERROR: qualified Rapid Auto Mode model directory must not be a symlink" >&2
+    echo "ERROR: Rapid Auto Mode model directory must not be a symlink" >&2
     exit 2
 }
 
 [ -n "$rapid_auto_model_dir" ] && [ -f "$rapid_auto_model_dir/config.json" ] || {
-    echo "ERROR: qualified Rapid Auto Mode model is unavailable: $LA_RAPID_AUTO_MODEL_DIR" >&2
+    echo "ERROR: pinned Rapid Auto Mode model is unavailable: $LA_RAPID_AUTO_MODEL_DIR" >&2
     exit 2
 }
 
 if [ "$selected_model_dir" != "$rapid_auto_model_dir" ]; then
     printf '%s\n' \
-        "ERROR: Rapid Auto Mode currently supports only its qualified Qwen3.6 model." \
-        "       selected:  $selected_model_dir" \
-        "       qualified: $rapid_auto_model_dir" >&2
+        "ERROR: Rapid Auto Mode currently supports only its single pinned model." \
+        "       (pinned for the dual-identity demonstration; NOT a qualified" \
+        "        classifier — it fails changed-prefix reuse.)" \
+        "       selected: $selected_model_dir" \
+        "       pinned:   $rapid_auto_model_dir" >&2
     exit 2
 fi
 
 if [ "$LA_CUR_THINK" != false ]; then
-    echo "ERROR: qualified Rapid Auto Mode requires a non-thinking session alias" >&2
+    echo "ERROR: Rapid Auto Mode requires a non-thinking session alias" >&2
     exit 2
 fi
 
 if [ "$SESSION_MODEL_ID" != "claude-opus-5" ]; then
-    printf 'ERROR: qualified Rapid Auto Mode requires session ID claude-opus-5, got %s\n' \
+    printf 'ERROR: Rapid Auto Mode requires session ID claude-opus-5, got %s\n' \
         "$SESSION_MODEL_ID" >&2
     exit 2
 fi
@@ -136,7 +157,7 @@ case "$LA_RAPID_AUTO_CLASSIFIER_MODEL_ID" in
 esac
 
 if [ "$LA_RAPID_AUTO_CLASSIFIER_MODEL_ID" != "claude-sonnet-5" ]; then
-    printf 'ERROR: qualified Rapid Auto Mode requires classifier ID claude-sonnet-5, got %s\n' \
+    printf 'ERROR: Rapid Auto Mode requires classifier ID claude-sonnet-5, got %s\n' \
         "$LA_RAPID_AUTO_CLASSIFIER_MODEL_ID" >&2
     exit 2
 fi

@@ -339,11 +339,14 @@ la_load_config() {
   : "${LA_RAPID_MAX_CONCURRENT_REQUESTS:=2}"
 
   # Opt-in Rapid Auto Mode qualification runtime. It remains unwired from the
-  # default launcher until a real Claude Code smoke test passes. One qualified
-  # Qwen3.6 engine accepts claude-opus-5 as its served name and
-  # claude-sonnet-5 as a retained local
-  # model-path identity. Its cache and fixtures are isolated from generic
-  # Rapid sessions and from oMLX.
+  # default launcher until a real Claude Code smoke test passes. One engine
+  # accepts claude-opus-5 as its served name and claude-sonnet-5 as a retained
+  # local model-path identity — that dual-identity route is proven. The MODEL
+  # pinned below is not: Qwen3.6's hybrid cache is non_trimmable, so it fails
+  # changed-prefix reuse (a growing prefix is what a live session produces).
+  # Devstral Small 2 24B is the current leading candidate; see the launcher
+  # header for the measured evidence. Cache and fixtures are isolated from
+  # generic Rapid sessions and from oMLX.
   : "${LA_RAPID_AUTO_BIN:=$HOME/.venvs/rapid-mlx-0.13.4/bin/rapid-mlx}"
   : "${LA_RAPID_AUTO_MODEL_DIR:=$LA_MODELS_DIR/Qwen3.6-35B-A3B-4bit}"
   : "${LA_RAPID_AUTO_CLASSIFIER_MODEL_ID:=claude-sonnet-5}"

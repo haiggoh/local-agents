@@ -84,22 +84,22 @@ grep -qF 'must be a strict descendant' "$LAUNCHER"
 check $? "launcher confines persistent roots below the local-agents cache base"
 
 grep -qF 'model directory must not be a symlink' "$LAUNCHER"
-check $? "launcher rejects a symlinked qualified model root"
+check $? "launcher rejects a symlinked pinned model root"
 
 grep -qF 'PY_MODEL_PROCESSES' "$LAUNCHER"
 check $? "launcher uses a self-match-safe model-process gate"
 
 grep -qF 'LA_RAPID_AUTO_MODEL_DIR' "$CONFIG_LIB"
-check $? "config library exposes qualified Rapid Auto Mode model"
+check $? "config library exposes the pinned Rapid Auto Mode model"
 
 grep -qF 'rapid-mlx 0.13.4' "$LAUNCHER"
-check $? "launcher pins the qualified Rapid version"
+check $? "launcher pins the tested Rapid version"
 
 grep -qF 'requires a non-thinking session alias' "$LAUNCHER"
-check $? "launcher rejects unqualified thinking aliases"
+check $? "launcher rejects thinking aliases"
 
 grep -qF 'requires classifier ID claude-sonnet-5' "$LAUNCHER"
-check $? "launcher pins the qualified classifier identity"
+check $? "launcher pins the classifier compatibility identity"
 
 grep -qF -- '--autocompact "$LA_AUTO_COMPACT_WINDOW"' "$LAUNCHER"
 check $? "launcher preserves native Claude autocompaction option"
@@ -108,13 +108,29 @@ grep -qF 'must be between 1 and 65535' "$LAUNCHER"
 check $? "launcher validates the dedicated port range"
 
 grep -qF 'must be at least 8000' "$LAUNCHER"
-check $? "launcher preserves the qualified classifier cache floor"
+check $? "launcher preserves the classifier cache floor"
 
 grep -qF 'local-agent-system-prompt.txt' "$LAUNCHER"
 check $? "launcher preserves the maintained local-agent prompt"
 
 grep -qF 'OPT-IN QUALIFICATION LAUNCHER' "$LAUNCHER"
 check $? "launcher is visibly not the default route before live smoke"
+
+# The pinned model demonstrated the dual-identity ROUTE; it is not a qualified
+# classifier. Qwen3.6's hybrid cache is non_trimmable, so it fails changed-prefix
+# reuse — the case a live session produces every turn. Guard against the earlier
+# wording, which asserted a qualification the evidence withdrew.
+! grep -qE 'qualified (Qwen3\.6|Rapid Auto Mode (model|requires))' "$LAUNCHER"
+check $? "launcher does not call its pinned model a qualified classifier"
+
+grep -qF 'non_trimmable' "$LAUNCHER"
+check $? "launcher records why the pinned model fails changed-prefix reuse"
+
+grep -qF 'Devstral' "$LAUNCHER"
+check $? "launcher names the current leading candidate"
+
+! grep -qF 'qualified Qwen3.6' "$CONFIG_LIB"
+check $? "config library does not call the pinned model qualified"
 
 echo "== sandboxed Rapid Auto Mode dry run =="
 
