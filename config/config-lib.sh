@@ -338,7 +338,28 @@ la_load_config() {
   : "${LA_RAPID_MAX_NUM_SEQS:=2}"
   : "${LA_RAPID_MAX_CONCURRENT_REQUESTS:=2}"
 
-  # oMLX Auto Mode readiness policy. Exact request fixtures refresh weekly,
+  # Opt-in Rapid Auto Mode qualification runtime. It remains unwired from the
+  # default launcher until a real Claude Code smoke test passes. One qualified
+  # Qwen3.6 engine accepts claude-opus-5 as its served name and
+  # claude-sonnet-5 as a retained local
+  # model-path identity. Its cache and fixtures are isolated from generic
+  # Rapid sessions and from oMLX.
+  : "${LA_RAPID_AUTO_BIN:=$HOME/.venvs/rapid-mlx-0.13.4/bin/rapid-mlx}"
+  : "${LA_RAPID_AUTO_MODEL_DIR:=$LA_MODELS_DIR/Qwen3.6-35B-A3B-4bit}"
+  : "${LA_RAPID_AUTO_CLASSIFIER_MODEL_ID:=claude-sonnet-5}"
+  : "${LA_RAPID_AUTO_PORT:=8002}"
+  : "${LA_RAPID_AUTO_CACHE_ROOT:=$HOME/.cache/local-agents/rapid-auto}"
+  : "${LA_RAPID_AUTO_PREWARM_FIXTURE_ROOT:=$HOME/.cache/local-agents/rapid-auto-fixtures}"
+  : "${LA_RAPID_AUTO_CACHE_MEMORY_MB:=16384}"
+  : "${LA_RAPID_AUTO_HYBRID_CACHE_ENTRIES:=8}"
+  : "${LA_RAPID_AUTO_RESIDENT_MEMORY_LIMIT_GB:=32}"
+  : "${LA_RAPID_AUTO_KEEP_RUNTIME_VIEW:=0}"
+  : "${LA_RAPID_AUTO_DRY_RUN:=0}"
+
+  # Backend-neutral Auto Mode readiness policy. Historical LA_OMLX_* names
+  # remain the public compatibility surface while dedicated launchers isolate
+  # their fixture and cache roots and fingerprint their backend version.
+  # Exact request fixtures refresh weekly,
   # after Claude/oMLX/profile identity changes, or after a detected classifier
   # failure. Every Auto Mode launch performs a fast replay verification.
   : "${LA_OMLX_AUTO_PREWARM:=1}"

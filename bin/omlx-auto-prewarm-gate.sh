@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# oMLX Auto Mode readiness gate.
+# Backend-neutral Auto Mode readiness gate.
 #
-# Sourced by launch-claude-agent-omlx.sh after config-lib.sh and
-# omlx-progress.sh. It owns:
+# Sourced by the dedicated oMLX and Rapid Auto Mode launchers after
+# config-lib.sh and omlx-progress.sh. Historical LA_OMLX_* names remain for
+# compatibility. It owns:
 # - fixture fingerprint and refresh policy;
 # - main-session engine warmup;
 # - genuine classifier request capture;
@@ -107,6 +108,7 @@ PY_GROWTH
 }
 
 la_omlx_prewarm_prepare() {
+    : "${LA_AUTO_MODE_BACKEND_LABEL:=oMLX}"
     : "${LA_OMLX_AUTO_PREWARM:=1}"
     : "${LA_OMLX_PREWARM_FIXTURE_ROOT:=$HOME/.cache/local-agents/omlx-auto-fixtures}"
     : "${LA_OMLX_PREWARM_MAX_AGE_DAYS:=7}"
@@ -122,7 +124,7 @@ la_omlx_prewarm_prepare() {
 
     [ "$LA_OMLX_AUTO_PREWARM" = 1 ] || {
         printf '%s\n' \
-            "ERROR: oMLX Auto Mode requires classifier readiness verification." \
+            "ERROR: $LA_AUTO_MODE_BACKEND_LABEL Auto Mode requires classifier readiness verification." \
             "       Turn Auto Mode off instead of bypassing its safety gate." >&2
         return 2
     }
@@ -188,6 +190,7 @@ la_omlx_prewarm_prepare() {
         --cwd "$PWD"
         --segmented-transcript
         "${CLAUDE_CODE_AUTO_MODE_SEGMENTED_TRANSCRIPT:-1}"
+        --profile-value "backend=$LA_AUTO_MODE_BACKEND_LABEL"
         --profile-value "session_alias=$MODEL_ALIAS"
         --profile-value "session_model_id=$SESSION_MODEL_ID"
         --profile-value "effort=$EFFORT"
@@ -454,7 +457,7 @@ la_omlx_capture_genuine() {
         --output-format json
         --no-session-persistence
         --append-system-prompt
-        "LOCAL oMLX Auto Mode classifier fixture refresh."
+        "LOCAL $LA_AUTO_MODE_BACKEND_LABEL Auto Mode classifier fixture refresh."
     )
 
     if [ -n "${LA_CLAUDE_SETTINGS:-}" ]; then
