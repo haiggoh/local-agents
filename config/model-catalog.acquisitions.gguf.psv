@@ -1,0 +1,22 @@
+# New selective GGUF acquisitions for llama.cpp
+#
+# Schema:
+# alias|label|repo|revision|subdir|size_GB|group|status|include_patterns|runtime
+#
+# include_patterns is semicolon-separated. Each selective quant has a distinct
+# subdirectory because repository, revision, and included payload form a separate
+# acquisition identity.
+#
+# Reconcile exact filenames with `hf download --dry-run` before downloading.
+# Replace revision=main with a pinned commit after read-only HF resolution.
+# Sizes are planning estimates until measured by `hf download --dry-run`.
+# Always configure an explicit bounded server context for these large models.
+
+mistral-medium35-q4km-v3|Mistral Medium 3.5 128B Q4_K_M v3 — operational tournament build|NeuralNotwerk/Mistral-Medium-3.5-128B-GGUF|main|Mistral-Medium-3.5-128B-Q4_K_M-v3|70.0|acquisition,wave3,llamacpp,mistral,heavy-agent|candidate|Mistral-Medium-3.5-128B-Q4_K_M-v3.gguf|llama.cpp
+mistral-medium35-q5km-v3|Mistral Medium 3.5 128B Q5_K_M v3 — quality-control build|NeuralNotwerk/Mistral-Medium-3.5-128B-GGUF|main|Mistral-Medium-3.5-128B-Q5_K_M-v3|83.0|acquisition,wave3,llamacpp,mistral,precision-control|conditional|Mistral-Medium-3.5-128B-Q5_K_M-v3.gguf|llama.cpp
+mistral-medium35-mmproj|Mistral Medium 3.5 BF16 multimodal projector — optional sidecar|NeuralNotwerk/Mistral-Medium-3.5-128B-GGUF|main|Mistral-Medium-3.5-128B-mmproj-bf16|5.1|acquisition,wave3,llamacpp,mistral,vision,sidecar|conditional|Mistral-Medium-3.5-128B-mmproj-bf16.gguf|llama.cpp
+
+glm53-flash-aj-iq2|GLM-5.3 Flash AJ-IQ2_XXS GGUF — practical 128 GB build|aj9o9/GLM-5.3-Flash-GGUF|main|GLM-5.3-Flash-AJ-IQ2_XXS|87.35|acquisition,wave3,llamacpp,glm,low-bit|experimental|AJ-IQ2_XXS/*.gguf|llama.cpp
+glm53-flash-aj-iq3|GLM-5.3 Flash AJ-IQ3_XXS GGUF — tight-memory quality comparison|aj9o9/GLM-5.3-Flash-GGUF|main|GLM-5.3-Flash-AJ-IQ3_XXS|112.40|acquisition,wave3,llamacpp,glm,precision-control|conditional|AJ-IQ3_XXS/*.gguf|llama.cpp
+
+deepseek-v4-flash-0731-hetero-v2|DeepSeek V4 Flash 0731 heterogeneous v2 GGUF — 128 GB agentic challenger|salen-00/DeepSeek-V4-Flash-0731-GGUF|main|DeepSeek-V4-Flash-0731-hetero-v2|95.8|acquisition,wave3,llamacpp,deepseek,reasoner,agentic|experimental|DeepSeek-V4-Flash-0731-hetero-v2.gguf|llama.cpp

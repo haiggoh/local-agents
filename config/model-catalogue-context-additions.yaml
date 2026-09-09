@@ -1,0 +1,352 @@
+schema_version: 2
+reviewed_at: "2026-09-05"
+purpose: >-
+  Reviewed context-window and Claude Code autocompaction metadata for every
+  artifact listed in the three new acquisition PSV catalogues.
+
+placement:
+  repository: local-agents
+  required_path: config/model-catalogue-context-additions.yaml
+  sibling_download_catalogues:
+    - config/model-catalog.acquisitions.rapid.psv
+    - config/model-catalog.acquisitions.omlx.psv
+    - config/model-catalog.acquisitions.gguf.psv
+  existing_context_catalogue: config/model-catalogue-context-list.yaml
+  instruction: >-
+    Keep this reviewed input under config with the PSV catalogues it references.
+    During Work package 0, inspect the live existing context catalogue and propose
+    a deterministic merge or canonical successor. Do not maintain two independent
+    runtime truths and do not overwrite the existing catalogue without approval.
+    After acquisition, reconcile each record against the pinned local artifact and
+    write final evidence to ~/.models/<directory>/.local-model-manifest.json.
+
+autocompaction_policy:
+  minimum_tokens: 100000
+  increment_tokens: 100000
+  maximum_tokens: 1000000
+  calculation: >-
+    min(1000000, floor(effective_context_tokens / 100000) * 100000)
+  effective_context_rule: >-
+    effective context is the minimum of the selected mode, exact artifact
+    configuration, backend capability, explicit server allocation, and any
+    enforced tested-safe cap
+
+records:
+  - psv_alias: qwen36-35b-a3b-4bit
+    directory_name: Qwen3.6-35B-A3B-4bit
+    repository: mlx-community/Qwen3.6-35B-A3B-4bit
+    artifact_kind: model
+    launchable: true
+    configured_context_tokens: 262144
+    recommended_initial_server_context_tokens: 262144
+    recommended_autocompaction_tokens: 200000
+    confidence: exact_config
+    context_evidence:
+      source: repository_config
+      json_pointer: /text_config/max_position_embeddings
+      value: 262144
+    notes: >-
+      The exact MLX config declares 262144. Do not add an approximately 1M mode
+      unless the pinned artifact and selected runtime explicitly provide and
+      validate the required scaling configuration.
+
+  - psv_alias: nemotron35-lightning-4bit
+    directory_name: NVIDIA-Nemotron-3.5-Lightning-30B-A3B-4bit
+    repository: mlx-community/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-4bit
+    artifact_kind: model
+    launchable: true
+    configured_context_tokens: 262144
+    recommended_initial_server_context_tokens: 262144
+    recommended_autocompaction_tokens: 200000
+    confidence: exact_config
+    context_evidence:
+      source: repository_config
+      json_pointer: /max_position_embeddings
+      value: 262144
+    notes: >-
+      The exact selected MLX artifact is configured for 262144. Do not substitute
+      a family-level 1M claim for this artifact-local value without a separately
+      represented and qualified extended mode.
+
+  - psv_alias: qwen3-coder-next-4bit
+    directory_name: Qwen3-Coder-Next-4bit
+    repository: mlx-community/Qwen3-Coder-Next-4bit
+    artifact_kind: model
+    launchable: true
+    configured_context_tokens: 262144
+    recommended_initial_server_context_tokens: 262144
+    recommended_autocompaction_tokens: 200000
+    confidence: exact_config
+    context_evidence:
+      source: repository_config
+      json_pointer: /max_position_embeddings
+      value: 262144
+    notes: >-
+      The exact selected MLX config declares 262144 and has no active RoPE
+      scaling entry, so no larger mode is asserted.
+
+  - psv_alias: granite42-30b-q4
+    directory_name: granite-4.2-30b-q4-mlx
+    repository: ibm-granite/granite-4.2-30b-q4-mlx
+    artifact_kind: model
+    launchable: true
+    configured_context_tokens: 131072
+    recommended_initial_server_context_tokens: 131072
+    recommended_autocompaction_tokens: 100000
+    confidence: exact_config
+    context_evidence:
+      source: repository_config
+      json_pointer: /max_position_embeddings
+      value: 131072
+
+  - psv_alias: minicpm5-1b-4bit
+    directory_name: MiniCPM5-1B-MLX
+    repository: openbmb/MiniCPM5-1B-MLX
+    revision: 9879b18bf2928355fcdf4287635388a3665a40cb
+    artifact_kind: model
+    launchable: true
+    architecture: LlamaForCausalLM
+    architecture_class: dense_transformer
+    configured_context_tokens: 131072
+    recommended_initial_server_context_tokens: 131072
+    recommended_autocompaction_tokens: 100000
+    primary_runtime: omlx
+    secondary_runtime_candidate: rapid-mlx
+    intended_role: dedicated_auto_mode_classifier
+    status: experimental
+    confidence: exact_config_and_repository_metadata
+    context_evidence:
+      source: repository_config
+      json_pointer: /max_position_embeddings
+      value: 131072
+    qualification_requirements:
+      - verify_exact_stage1_xml_contract
+      - verify_stage2_classifier_contract
+      - verify_segmented_prefix_reuse
+      - benchmark_cold_and_warm_50000_75000_100000
+      - compare_verdict_quality_with_current_deepseek_classifier
+    notes: >-
+      Preferred ultra-light classifier candidate. The selected 4-bit MLX artifact
+      is approximately 0.61 GB. Begin in non-thinking mode and do not promote it
+      solely on speed; it must pass strict classifier-contract and labeled-set
+      agreement tests.
+
+  - psv_alias: granite42-3b-4bit
+    directory_name: granite-4.2-3b-MLX-4bit
+    repository: lmstudio-community/granite-4.2-3b-MLX-4bit
+    artifact_kind: model
+    launchable: true
+    architecture_class: dense_transformer
+    configured_context_tokens: 131072
+    recommended_initial_server_context_tokens: 131072
+    recommended_autocompaction_tokens: 100000
+    primary_runtime: omlx
+    secondary_runtime_candidate: rapid-mlx
+    intended_role: auto_mode_classifier_quality_control
+    status: experimental
+    confidence: repository_metadata_pending_immutable_revision
+    context_evidence:
+      source: repository_config
+      json_pointer: /max_position_embeddings
+      value: 131072
+    qualification_requirements:
+      - resolve_immutable_revision
+      - verify_exact_stage1_xml_contract
+      - verify_stage2_classifier_contract
+      - verify_segmented_prefix_reuse
+      - benchmark_cold_and_warm_50000_75000_100000
+      - compare_verdict_quality_with_minicpm5_and_current_deepseek_classifier
+    notes: >-
+      Quality-control candidate if MiniCPM5 is fast but unreliable on the strict
+      classifier contract. The selected 4-bit MLX artifact is approximately
+      2.06 GB. Do not treat family-level compatibility as runtime qualification.
+
+  - psv_alias: gpt-oss-20b-mxfp4-q8
+    directory_name: gpt-oss-20b-MXFP4-Q8
+    repository: mlx-community/gpt-oss-20b-MXFP4-Q8
+    artifact_kind: model
+    launchable: true
+    configured_context_tokens: 131072
+    recommended_initial_server_context_tokens: 131072
+    recommended_autocompaction_tokens: 100000
+    confidence: exact_config
+    context_evidence:
+      source: repository_config
+      json_pointer: /max_position_embeddings
+      value: 131072
+    notes: >-
+      The exact selected 20B MXFP4-Q8 config declares 131072 and uses YaRN
+      scaling from an initial 4096-token base. Preserve the Harmony protocol.
+      The Hugging Face repository reports an approximately 12.1 GB payload.
+      Keep this as the fast lightweight GPT-OSS tier and compare it separately
+      with the 120B quality tier.
+
+  - psv_alias: gpt-oss-120b-mxfp4-q8
+    directory_name: gpt-oss-120b-MXFP4-Q8
+    repository: mlx-community/gpt-oss-120b-MXFP4-Q8
+    artifact_kind: model
+    launchable: true
+    configured_context_tokens: 131072
+    recommended_initial_server_context_tokens: 131072
+    recommended_autocompaction_tokens: 100000
+    confidence: exact_config
+    context_evidence:
+      source: repository_config
+      json_pointer: /max_position_embeddings
+      value: 131072
+    notes: >-
+      The exact config declares 131072 and YaRN scaling from an initial
+      4096-token base. Preserve the Harmony protocol independently of context.
+
+  - psv_alias: ternary-bonsai-27b-2bit
+    directory_name: Ternary-Bonsai-27B-mlx-2bit
+    repository: prism-ml/Ternary-Bonsai-27B-mlx-2bit
+    artifact_kind: model
+    launchable: true
+    configured_context_tokens: 262144
+    recommended_initial_server_context_tokens: 262144
+    recommended_autocompaction_tokens: 200000
+    confidence: exact_config_and_publisher_operational_evidence
+    context_evidence:
+      source: repository_config
+      json_pointer: /text_config/max_position_embeddings
+      value: 262144
+    operational_evidence:
+      publisher_reported_peak_memory_gb:
+        context_100000_no_kv_compression: 15.5
+        context_262144_with_4bit_kv: 12.8
+      exact_local_validation_required: true
+    notes: >-
+      The exact MLX config declares 262144. The publisher reports full 262K
+      operation and approximately 12.8 GB peak with its 4-bit KV-cache path.
+      Reconcile the PSV size: the published MLX package is 8.49 GB rather than
+      the earlier 7.9 GB estimate. Apple speculative decoding is not enabled by
+      default; establish a plain baseline first.
+
+  - psv_alias: qwen38-flash-reap288-q4
+    directory_name: Qwen3.8-Flash-Next-REAP-288-MLX-4bit
+    repository: sh0wie/Qwen3.8-Flash-Next-REAP-288-MLX-4bit
+    artifact_kind: model
+    launchable: true
+    configured_context_tokens: 262144
+    recommended_initial_server_context_tokens: 262144
+    recommended_autocompaction_tokens: 200000
+    confidence: exact_config
+    context_evidence:
+      source: repository_config
+      json_pointer: /text_config/max_position_embeddings
+      value: 262144
+    notes: >-
+      The exact pruned artifact declares 262144. No extended mode is asserted
+      from this config. Expert pruning changes artifact fidelity, not context.
+
+  - psv_alias: qwen38-flash-full-oq2-mtp
+    directory_name: Qwen3.8-Flash-Next-MLX-oQ2-MTP
+    repository: Vontra/Qwen3.8-Flash-Next-MLX-oQ2-MTP
+    artifact_kind: model
+    launchable: true
+    configured_context_tokens: 262144
+    recommended_initial_server_context_tokens: 262144
+    recommended_autocompaction_tokens: 200000
+    confidence: exact_config
+    context_evidence:
+      source: repository_config
+      json_pointer: /text_config/max_position_embeddings
+      value: 262144
+    notes: >-
+      The exact full-expert oQ2 artifact declares 262144 and includes one native
+      MTP layer. Establish a non-MTP baseline before qualifying acceleration.
+
+  - psv_alias: mistral-medium35-q4km-v3
+    directory_name: Mistral-Medium-3.5-128B-Q4_K_M-v3
+    repository: NeuralNotwerk/Mistral-Medium-3.5-128B-GGUF
+    artifact_kind: gguf_bundle
+    launchable: true
+    model_context_tokens: 262144
+    recommended_initial_server_context_tokens: 131072
+    recommended_autocompaction_tokens: 100000
+    later_qualified_server_context_tokens: 262144
+    later_qualified_autocompaction_tokens: 200000
+    confidence: model_card_high_operational_medium
+    notes: >-
+      Start the approximately 70 GB Q4 artifact at 128K and promote to 256K only
+      after exact-quant memory and long-context qualification.
+
+  - psv_alias: mistral-medium35-q5km-v3
+    directory_name: Mistral-Medium-3.5-128B-Q5_K_M-v3
+    repository: NeuralNotwerk/Mistral-Medium-3.5-128B-GGUF
+    artifact_kind: gguf_bundle
+    launchable: true
+    model_context_tokens: 262144
+    recommended_initial_server_context_tokens: 131072
+    recommended_autocompaction_tokens: 100000
+    later_qualified_server_context_tokens: 262144
+    later_qualified_autocompaction_tokens: 200000
+    confidence: model_card_high_operational_medium
+    notes: >-
+      Same model context as Q4, but the approximately 83 GB Q5 payload requires
+      independent memory qualification.
+
+  - psv_alias: mistral-medium35-mmproj
+    directory_name: Mistral-Medium-3.5-128B-mmproj-bf16
+    repository: NeuralNotwerk/Mistral-Medium-3.5-128B-GGUF
+    artifact_kind: processor
+    launchable: false
+    context_window_tokens: null
+    recommended_autocompaction_tokens: null
+    target_aliases:
+      - mistral-medium35-q4km-v3
+      - mistral-medium35-q5km-v3
+    confidence: high
+    notes: >-
+      Multimodal projector sidecar. It inherits its target's effective context
+      and never receives independent autocompaction.
+
+  - psv_alias: glm53-flash-aj-iq2
+    directory_name: GLM-5.3-Flash-AJ-IQ2_XXS
+    repository: aj9o9/GLM-5.3-Flash-GGUF
+    artifact_kind: gguf_bundle
+    launchable: true
+    model_context_tokens: 1048576
+    recommended_initial_server_context_tokens: 131072
+    recommended_autocompaction_tokens: 100000
+    confidence: model_max_high_operational_medium
+    notes: >-
+      Use 131072 initially. Larger allocations require exact local memory and
+      stability tests for this 87.35 GB artifact.
+
+  - psv_alias: glm53-flash-aj-iq3
+    directory_name: GLM-5.3-Flash-AJ-IQ3_XXS
+    repository: aj9o9/GLM-5.3-Flash-GGUF
+    artifact_kind: gguf_bundle
+    launchable: true
+    model_context_tokens: 1048576
+    recommended_initial_server_context_tokens: 100000
+    recommended_autocompaction_tokens: 100000
+    confidence: model_max_high_operational_low
+    notes: >-
+      The 112.40 GB payload is exceptionally tight on 128 GB. Even 100K is
+      conditional on a successful exact local load test.
+
+  - psv_alias: deepseek-v4-flash-0731-hetero-v2
+    directory_name: DeepSeek-V4-Flash-0731-hetero-v2
+    repository: salen-00/DeepSeek-V4-Flash-0731-GGUF
+    artifact_kind: gguf_bundle
+    launchable: true
+    model_context_tokens: 1048576
+    recommended_initial_server_context_tokens: 131072
+    recommended_autocompaction_tokens: 100000
+    confidence: model_max_high_operational_medium
+    notes: >-
+      Use 131072 initially and always pass an explicit server context. Adding a
+      DSpark sidecar changes the memory budget and requires requalification.
+
+validation_requirements:
+  - Resolve every psv_alias uniquely across all loaded PSV catalogues.
+  - Verify every selected repository revision and payload size before download.
+  - Inspect exact local config.json or GGUF metadata after acquisition.
+  - Retain credible conflicts and record the reviewed resolution.
+  - Do not let tokenizer sentinels or processor limits override text context.
+  - Require server context to be at least the selected autocompaction value.
+  - Recompute autocompaction whenever effective context changes.
+  - Do not assign independent context to processor or sidecar records.

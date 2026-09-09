@@ -1,0 +1,21 @@
+# New Rapid-MLX-oriented model acquisitions
+#
+# Schema:
+# alias|label|repo|revision|subdir|size_GB|group|status|include_patterns|runtime
+#
+# Reconcile repositories and Rapid-MLX aliases against live upstream state.
+# Replace revision=main with a pinned commit after read-only HF resolution.
+# Sizes are planning estimates until measured by `hf download --dry-run`.
+# Acquisition does not imply runtime or tournament qualification.
+
+qwen36-35b-a3b-4bit|Qwen3.6 35B-A3B MLX 4-bit — fast general operator|mlx-community/Qwen3.6-35B-A3B-4bit|main|Qwen3.6-35B-A3B-4bit|19.0|acquisition,wave1,rapid,qwen,operator|candidate||rapid-mlx
+nemotron35-lightning-4bit|NVIDIA Nemotron 3.5 Lightning 30B-A3B MLX 4-bit — fast reasoning agent|mlx-community/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-4bit|main|NVIDIA-Nemotron-3.5-Lightning-30B-A3B-4bit|18.0|acquisition,wave1,rapid,nemotron,reasoner|candidate||rapid-mlx
+qwen3-coder-next-4bit|Qwen3-Coder-Next MLX 4-bit — coding-agent specialist|mlx-community/Qwen3-Coder-Next-4bit|main|Qwen3-Coder-Next-4bit|45.0|acquisition,wave1,rapid,qwen,coder|candidate||rapid-mlx
+granite42-30b-q4|IBM Granite 4.2 30B Q4 MLX — enterprise tools and reasoning|ibm-granite/granite-4.2-30b-q4-mlx|main|granite-4.2-30b-q4-mlx|18.0|acquisition,wave1,rapid,granite,tools|candidate||rapid-mlx
+
+minicpm5-1b-4bit|MiniCPM5 1B MLX 4-bit — ultra-light dedicated Auto Mode classifier|openbmb/MiniCPM5-1B-MLX|9879b18bf2928355fcdf4287635388a3665a40cb|MiniCPM5-1B-MLX|0.61|acquisition,wave1,classifier,dense,minicpm,lightweight,omlx,rapid|experimental||omlx
+granite42-3b-4bit|IBM Granite 4.2 3B MLX 4-bit — Auto Mode classifier quality-control candidate|lmstudio-community/granite-4.2-3b-MLX-4bit|main|granite-4.2-3b-MLX-4bit|2.06|acquisition,wave1,classifier,dense,granite,lightweight,omlx,rapid|experimental||omlx
+
+gpt-oss-20b-mxfp4-q8|GPT-OSS 20B MXFP4-Q8 — fast lightweight Harmony reasoning and tools|mlx-community/gpt-oss-20b-MXFP4-Q8|main|gpt-oss-20b-MXFP4-Q8|12.1|acquisition,wave2,rapid,gpt-oss,lightweight,reasoner,tools|candidate||rapid-mlx
+gpt-oss-120b-mxfp4-q8|GPT-OSS 120B MXFP4-Q8 — Harmony reasoning and tools|mlx-community/gpt-oss-120b-MXFP4-Q8|main|gpt-oss-120b-MXFP4-Q8|65.0|acquisition,wave2,rapid,gpt-oss,reasoner,tools|candidate||rapid-mlx
+ternary-bonsai-27b-2bit|Ternary Bonsai 27B MLX 2-bit — ultra-light fast worker|prism-ml/Ternary-Bonsai-27B-mlx-2bit|main|Ternary-Bonsai-27B-mlx-2bit|7.9|acquisition,wave2,rapid,lightweight,worker|experimental||rapid-mlx

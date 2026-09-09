@@ -1,0 +1,13 @@
+# New oMLX / MLX-VLM-oriented model acquisitions
+#
+# Schema:
+# alias|label|repo|revision|subdir|size_GB|group|status|include_patterns|runtime
+#
+# These artifacts are not assumed to be Rapid-MLX-qualified.
+# Install and qualify oMLX separately before serving them.
+# Replace revision=main with a pinned commit after read-only HF resolution.
+# Sizes are planning estimates until measured by `hf download --dry-run`.
+# Start with native MTP disabled and establish a non-speculative baseline.
+
+qwen38-flash-reap288-q4|Qwen3.8 Flash-Next REAP-288 MLX 4-bit — practical pruned high-tier challenger|sh0wie/Qwen3.8-Flash-Next-REAP-288-MLX-4bit|main|Qwen3.8-Flash-Next-REAP-288-MLX-4bit|68.0|acquisition,wave2,omlx,qwen,flash-next,reap,pruned|experimental||omlx
+qwen38-flash-full-oq2-mtp|Qwen3.8 Flash-Next full-expert MLX oQ2 with native MTP — aggressive low-bit comparison|Vontra/Qwen3.8-Flash-Next-MLX-oQ2-MTP|main|Qwen3.8-Flash-Next-MLX-oQ2-MTP|70.8|acquisition,wave3,omlx,qwen,flash-next,full-expert,mtp|experimental||omlx
