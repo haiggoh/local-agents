@@ -2,16 +2,18 @@
 """classifier-qualify.py — model-agnostic Auto Mode classifier qualification.
 
 WHY THIS EXISTS
-Fourteen sessions of Auto Mode work qualified candidate classifiers by hand, one
+Sixteen sessions of Auto Mode work qualified candidate classifiers by hand, one
 model at a time, and the interesting failures were all found LATE. The two that
 cost the most were structural, not incidental:
 
-  1. Qwen3.6 passed exact-request replay brilliantly (99.96% reuse, sub-second
-     warm) and still could not serve a live session, because its HYBRID cache is
-     non_trimmable: at a 98.84% shared prefix Rapid refused the entry and
-     recomputed all 37,569 tokens in ~32.9s. A live session grows its prefix
-     every turn, so EXACT replay alone qualifies nothing. That is why Stage 1 is
-     three runs (cold A -> exact A -> changed B), not two.
+  1. Qwen3.6 passed exact-request replay brilliantly (99.96% reuse of 37,490
+     tokens, warm runs 0.368-0.404s) and still could not serve a live session,
+     because its HYBRID cache is non_trimmable: on a later 37,569-token request
+     a 98.84% shared prefix (37,132 tokens) was refused outright and the whole
+     prompt was recomputed in ~32.9s. A live session grows its prefix every
+     turn, so EXACT replay alone qualifies nothing. That is why Stage 1 is
+     three runs (cold A -> exact A -> changed B), not two. (The two percentages
+     come from different fixture sizes; neither is the other's baseline.)
   2. Devstral failed Stage 1 with HTTP 400 BEFORE any prefill, because two
      adjacent user-role messages violate Mistral alternation. That is a harness
      mismatch, not a model verdict — so an adapted pass must stay visibly

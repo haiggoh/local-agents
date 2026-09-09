@@ -2,10 +2,17 @@
 # launch-claude-agent-rapid-auto.sh — local Claude Code Auto Mode via Rapid-MLX.
 #
 # What IS proven: the native dual-identity route. One Rapid process accepts both
-# compatibility identities — the relative model path stays "claude-sonnet-5"
-# while --served-model-name exposes "claude-opus-5". No proxy and no persistent
-# user alias is involved. Claude Code needs a separate logical classifier
-# IDENTITY, not separate weights or a second process.
+# compatibility identities. Mechanically: a TEMPORARY SYMLINK named
+# "claude-sonnet-5" points at the real model directory and Rapid is served from
+# that parent, so the relative model path IS the classifier identity, while
+# --served-model-name exposes "claude-opus-5". No proxy and no persistent user
+# alias is involved (a persistent alias was tried and rejected — it resolves to
+# a HuggingFace repo ID, not the local path). Claude Code needs a separate
+# logical classifier IDENTITY, not separate weights or a second process.
+#
+# Consequence worth knowing when debugging: /v1/models advertises ONLY the Opus
+# identity, and a response to a Sonnet-addressed request reports
+# model='claude-opus-5'. That is expected, not a misroute.
 #
 # What is NOT proven, and why this launcher is not the default route:
 # Qwen3.6 below is the model the dual-identity route was DEMONSTRATED on, not a

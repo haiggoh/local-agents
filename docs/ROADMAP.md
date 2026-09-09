@@ -615,9 +615,15 @@ No single release may become several releases at once.
 
 - **K-Search is no longer deferred**, and it is **not model-specific** — it optimizes the Mamba
   selective-scan kernel, so any Mamba-based model benefits. The Mamba surface is growing on both ends:
-  **Nemotron 3.5 Lightning** and **Granite 4.2 30B Q4** both arrive in acquisition Wave 1, Granite 4.0
-  H-Tiny is already on disk, and Granite is additionally the leading classifier-engine candidate for
-  locally routed Auto Mode — so one kernel win compounds across three workstreams. It stays *gated*.
+  **Nemotron 3.5 Lightning** and **Granite 4.2 30B Q4** both arrive in acquisition Wave 1 and Granite 4.0
+  H-Tiny is already on disk — so one kernel win compounds across several workstreams. It stays *gated*.
+  (Corrected 2026-09-10: Granite was previously listed here as "the leading classifier-engine candidate
+  for locally routed Auto Mode". It is not. Granite was rejected as a classifier — it generates
+  reasoning-like text after the closed thinking section, which breaks the verdict contract — and is
+  retained only for main-model testing. **Devstral Small 2 24B** is the current leading classifier
+  candidate: dense/non-hybrid, so it genuinely trims a changed prefix, where Qwen3.6's hybrid
+  non-trimmable cache does not. Note the Granite rejection is NOT a Rapid bug: `--no-thinking` does
+  correctly propagate to `enable_thinking=False`, so do not report the thinking toggle as broken.)
   See [K-Search](#k-search) for what it actually is, which is not what its previous one-word listing
   implied. Tracked by `nemotron-3-nano-granite-4-0-h`, whose title now badly understates its scope.
 - **"Qualifying every roster model" is narrowed, not revived.** A *bounded* tournament with fixed tiers
