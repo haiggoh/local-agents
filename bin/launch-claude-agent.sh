@@ -107,6 +107,16 @@ if [ "$LA_TELEMETRY" = "0" ]; then
     export DISABLE_ERROR_REPORTING=1
     export DISABLE_AUTOUPDATER=1
 fi
+# Accept a ROLE NAME (operator/reasoner/validator/utility) wherever an alias is accepted, so a
+# caller never has to hardcode a model name that goes stale silently. An alias still wins, so this
+# cannot change what any existing invocation does.
+if [ -n "$MODEL_ALIAS" ]; then
+    _resolved="$(la_resolve_target "$MODEL_ALIAS" 2>/dev/null || true)"
+    if [ -n "$_resolved" ] && [ "$_resolved" != "$MODEL_ALIAS" ]; then
+        echo "🎯 role '$MODEL_ALIAS' -> $_resolved (resolved from the on-disk role bindings)"
+        MODEL_ALIAS="$_resolved"
+    fi
+fi
 if [ -z "$MODEL_ALIAS" ] || ! la_lookup "$MODEL_ALIAS"; then
     la_retired_hint "$MODEL_ALIAS" || true
     echo "Usage: $0 <alias> [effort-override]"; echo "Registered aliases:"; la_aliases_help

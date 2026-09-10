@@ -29,11 +29,30 @@ is not qualification.
   its own cache and fixture roots, isolated from generic Rapid sessions and from
   oMLX, behind `LA_RAPID_AUTO_*`.
 
+- Role names are now accepted wherever a model alias is, via `la_resolve_target`
+  in `config/config-lib.sh`. `launch-claude-agent.sh operator`,
+  `local-llm-hotswap.sh reasoner` and `local-agent-dispatch.py --model validator`
+  resolve to whichever model fills that role **on disk right now**. An alias still
+  wins over a role, so no existing invocation changes behaviour. Covered by
+  `tests/test_role_resolution.sh` (9 assertions, mutation-tested 3/3 including a
+  planted off-disk binding, without which the on-disk filter was undetectable).
+- `tests/test_setup_shortcuts.sh` — regression coverage for the alias installer
+  (19 assertions, mutation-tested 5/5). It exists because this release's own
+  rewrite briefly removed the installer's write steps while it still printed
+  `✓ local-* aliases written` and exited 0, creating no file at all.
+
 ### Changed
 
 - The readiness gate is backend-neutral. The historical `LA_OMLX_*` names remain
   the public compatibility surface, and the backend is recorded in the prewarm
   profile so a fixture cannot be replayed across backends.
+- The `local-*` shell aliases name ROLES instead of hardcoded models. The old
+  block pinned `qwen-3.6-*` while the roster had moved on, so the aliases kept
+  succeeding on a stale model with no signal. Retired the nine per-model
+  `local-agent-*` dispatch aliases and the `agy-local` compat alias in favour of
+  one `local-dispatch` taking `--model <role|alias>`; added `local-validator`,
+  `local-roles` and `local-disk`. `local-logs` now matches the `rapid_auto_*` and
+  `omlx_*` logs the current backends actually write, not only `vllm_*`.
 
 ## [0.13.10] — 2026-09-08
 

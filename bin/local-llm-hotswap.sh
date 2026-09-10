@@ -25,6 +25,14 @@ mkdir -p "$CONFIG_DIR" "$(dirname "$LOG_FILE_BASE")"
 # single-slot SimpleEngine; LA_ADMISSION=wait makes overflow QUEUE instead of erroring (EngineBusy).
 export VLLM_MLX_SIMPLE_ENGINE_LOCK_ADMISSION="$LA_ADMISSION"
 
+# Accept a ROLE NAME as well as an alias (see la_resolve_target); an alias always wins.
+if [ -n "$MODEL_NAME" ]; then
+    _resolved="$(la_resolve_target "$MODEL_NAME" 2>/dev/null || true)"
+    if [ -n "$_resolved" ] && [ "$_resolved" != "$MODEL_NAME" ]; then
+        echo "🎯 role '$MODEL_NAME' -> $_resolved" >&2
+        MODEL_NAME="$_resolved"
+    fi
+fi
 if [ -z "$MODEL_NAME" ] || ! la_lookup "$MODEL_NAME"; then
     la_retired_hint "$MODEL_NAME" || true
     echo "Usage: $0 <alias>"; echo "Registered aliases:"; la_aliases_help; exit 1

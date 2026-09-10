@@ -453,6 +453,35 @@ la_lookup() {
   return 0
 }
 
+# la_resolve_target <alias-or-role> -> prints the ALIAS to act on, returns 1 if it resolves to
+# nothing. This is the single naming entry point for every consumer that takes a `<alias>`
+# argument, and it exists so nothing has to hardcode a model name again.
+#
+# WHY: a hardcoded alias goes stale SILENTLY. The shell aliases pinned qwen-3.6-* while the
+# roster moved on to 3.8 and beyond, so `local-operator` kept launching successfully — just the
+# wrong model, with no signal that anything was out of date. A role name is resolved against the
+# bindings and against DISK at call time, so it cannot drift.
+#
+# Order of precedence, deliberately alias-first: a registered alias always wins, so adding role
+# support can never change what an existing alias argument does (even if someone names a model
+# after a role). Registration is enough for an alias — availability is the RAM preflight's and
+# the load path's error to report, not a naming error. For a ROLE, only ON-DISK bindings are
+# eligible: a role means "whatever currently fills this job", and a model whose weights are
+# absent does not fill it. First on-disk binding wins (config order = preference order).
+la_resolve_target() {
+  local t="${1:-}"
+  [ -n "$t" ] || return 1
+  # 1. An exact registered alias resolves to itself, on disk or not.
+  if [ -n "${LA_SUBDIR[$t]+x}" ]; then echo "$t"; return 0; fi
+  # 2. A role resolves to its first ON-DISK binding.
+  local alias effort mode
+  while IFS='|' read -r alias effort mode; do
+    [ -n "$alias" ] || continue
+    la_on_disk "$alias" && { echo "$alias"; return 0; }
+  done < <(la_role_bindings_for "$t")
+  return 1
+}
+
 # la_on_disk <alias> -> 0 if the model's weights are actually present (a real weight file, not
 # just a non-empty directory). This is what
 # makes the roster "informed by what's actually available": a registered model isn't usable until
