@@ -618,6 +618,46 @@ def main() -> int:
             "the detail states explicitly that the candidate is not judged on it",
         )
 
+        print("== exit codes distinguish judged-fail from unjudged ==")
+        # 0 = pass, 1 = JUDGED and failed, 3 = UNJUDGED. Automation that treats
+        # any non-zero as "model rejected" would misread a harness failure as a
+        # verdict, so the two must not collapse. (Note when checking by hand: a
+        # shell pipeline reports the LAST command's status, so `cmd | head`
+        # shows head's 0 and hides this entirely.)
+        code_unjudged = cq.main(
+            [
+                "--candidate",
+                "stub",
+                "--backend-url",
+                "http://127.0.0.1:9",
+                "--timeout",
+                "1",
+                "--json",
+                str(tmp / "unjudged.json"),
+                "--stage1-fixture",
+                str(tmp / "missing-fixture.json"),
+            ]
+        )
+        check(
+            code_unjudged == 3,
+            "an UNJUDGED run exits 3, never 0 and never 1",
+        )
+
+        code_judged, judged_report, _ = run(
+            tmp,
+            [
+                (200, verdict_response(), log(0, 38244)),
+                (200, verdict_response(), log(38244, 38244)),
+                (200, verdict_response(), log(0, 38244)),
+            ],
+            [],
+        )
+        check(
+            judged_report["stage1"]["outcome"] == "EXACT_ONLY"
+            and code_judged == 1,
+            "a JUDGED failure exits 1, distinct from the unjudged 3",
+        )
+
         print("== reporting honesty ==")
         code, report, _ = run(
             tmp,
