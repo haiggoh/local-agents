@@ -882,20 +882,32 @@ a frozen surface.
 
 ### Shell aliases
 
-Add these to your `~/.zshrc` (or `~/.bashrc`):
+Run `install/setup-shortcuts.sh` — it writes a fenced, idempotent block for you. The aliases it
+installs name **roles**, not models:
 
 ```zsh
-_la_bin="/path/to/local-agents/bin/local-agent-dispatch.py"
-alias local-agent="$_la_bin"                                      # default → qwen-3.6-operator
-alias local-agent-qwen="$_la_bin --model qwen-3.6-operator"      # Qwen 3.6 27B operator
-alias local-agent-thinking="$_la_bin --model qwen-3.6-thinking"  # Qwen 3.6 with thinking
-alias local-agent-r1="$_la_bin --model deepseek-r1-architect"    # DeepSeek R1 reasoner
-alias local-agent-scout="$_la_bin --model llama-scout"           # Llama Scout fast/light
-alias local-agent-kimi="$_la_bin --model kimi-vl-thinking"       # Kimi VL multimodal
-alias local-agent-kat="$_la_bin --model kat-coder-optiq"         # KAT Coder OptiQ
-alias local-agent-devstral="$_la_bin --model devstral-2-123b"    # Devstral 2 123B
-alias local-agent-gemma="$_la_bin --model gemma-4-26b"           # Gemma 4 26B
+# Sessions — <role> resolves to whichever model fills it on disk right now.
+alias local-operator="/path/to/local-agents/bin/launch-claude-agent.sh operator"
+alias local-fast="/path/to/local-agents/bin/launch-claude-agent.sh operator medium"
+alias local-xhigh="/path/to/local-agents/bin/launch-claude-agent.sh operator xhigh"
+alias local-thinking="/path/to/local-agents/bin/launch-claude-agent.sh reasoner"
+alias local-validator="/path/to/local-agents/bin/launch-claude-agent.sh validator"
+alias local-menu="/path/to/local-agents/bin/csl"        # numbered picker, incl. effort
+alias local-window="/path/to/local-agents/bin/new-local-window.sh"
+# Dispatch — one alias, any role or model.
+alias local-dispatch="/path/to/local-agents/bin/local-agent-dispatch.py"
+# Inspect.
+alias local-roles="/path/to/local-agents/bin/la-roles.sh"
+alias local-disk="/path/to/local-agents/bin/la-disk-inventory.sh"
+alias local-logs="tail -f $HOME/.claude/logs/*_[0-9][0-9][0-9][0-9].log"
 ```
+
+**Why roles and not one alias per model.** A hardcoded model name in a shortcut freezes a roster
+fact, and it goes stale *silently* — the alias keeps launching successfully, just on last month's
+model, with nothing to signal the drift. `operator`, `reasoner`, `validator` and `utility` are
+resolved against the on-disk role bindings at invocation time, so the roster can move underneath
+them. Pass an explicit alias whenever you do want one specific model; an alias always wins over a
+role, and `local-roles` shows which model currently answers to each.
 
 Or create a symlink for shell-agnostic access:
 
@@ -921,28 +933,28 @@ for the complete dispatcher reference and development notes.
 ### Usage
 
 ```bash
-# Generic (defaults to qwen-3.6-operator):
-local-agent --prompt "What does this module do?" --files src/main.py
+# By ROLE — whichever model fills it on disk right now:
+local-dispatch --model operator --prompt "What does this module do?" --files src/main.py
 
-# With a specific model:
-local-agent-r1 --prompt "Review this plan and identify architectural risks"
+# The reasoner, for planning and architectural review:
+local-dispatch --model reasoner --prompt "Review this plan and identify architectural risks"
 
-# Multiple files, custom token budget:
-local-agent-devstral --prompt "Refactor the following into clean functions" \
+# A specific model by alias, when you want exactly that one:
+local-dispatch --model devstral-2-123b --prompt "Refactor the following into clean functions" \
   --files utils.py helpers.py --max-tokens 2048
 
 # Piping output to a file:
-local-agent-qwen --prompt "Summarize test coverage gaps" --files tests/ > summary.txt
+local-dispatch --model operator --prompt "Summarize test coverage gaps" --files tests/ > summary.txt
 
 # Inside any agent CLI or Claude Code session (prefix ! to run locally, zero cloud quota):
-! local-agent-qwen --prompt "First-pass review of this diff" --files my_changes.patch
+! local-dispatch --model validator --prompt "First-pass review of this diff" --files my_changes.patch
 ```
 
 ### Options
 
 | Flag | Default | Description |
 | :--- | :--- | :--- |
-| `--model` | `qwen-3.6-operator` | Model alias from your `config.local.sh` registry |
+| `--model` | `qwen-3.6-operator` | Role name (`operator`/`reasoner`/`validator`/`utility`) or model alias from your `config.local.sh` registry |
 | `--prompt` | *(required)* | Task prompt text |
 | `--files` | *(none)* | One or more file paths to inline as context |
 | `--max-tokens` | `4096` | Max tokens the model should generate |
