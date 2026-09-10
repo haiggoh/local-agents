@@ -389,7 +389,12 @@ def default_pin_validator(repo: Path, version: str) -> None:
             raise ManagerError(f"post-promotion versioned path missing from {path}")
         if path in (launcher, tests) and f"rapid-mlx {version}" not in text:
             raise ManagerError(f"post-promotion exact version assertion missing from {path}")
-    run(["python3", "-m", "py_compile", "install/manage-rapid-mlx.py", "tests/test_manage_rapid_mlx.py"], cwd=repo)
+    compile_code = (
+        "from pathlib import Path; "
+        "[compile(Path(p).read_text(encoding='utf-8'), p, 'exec') "
+        "for p in ('install/manage-rapid-mlx.py', 'tests/test_manage_rapid_mlx.py')]"
+    )
+    run([sys.executable, "-B", "-c", compile_code], cwd=repo)
     run(["bash", "tests/test_rapid_auto_mode.sh"], cwd=repo)
     run(["git", "diff", "--check"], cwd=repo)
 

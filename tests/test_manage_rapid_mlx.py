@@ -123,6 +123,25 @@ with tempfile.TemporaryDirectory() as temporary:
     check((transaction / "manifest.json").is_file(), "transaction manifest retained")
     check(not module.plan_pin_update(repo, "0.14.0").changes, "second promotion is an idempotent no-op")
 
+print("== bytecode-free post-promotion validation ==")
+with tempfile.TemporaryDirectory() as temporary:
+    root = Path(temporary)
+    repo = create_repo(root)
+    commands: list[list[str]] = []
+    original_run = module.run
+    try:
+        module.run = lambda command, **_kwargs: commands.append(command)
+        module.default_pin_validator(repo, "0.13.4")
+    finally:
+        module.run = original_run
+    compile_command = commands[0]
+    check(
+        compile_command[:3] == [sys.executable, "-B", "-c"]
+        and "py_compile" not in compile_command
+        and "compile(" in compile_command[3],
+        "post-promotion syntax validation cannot create repository bytecode",
+    )
+
 print("== full rollback on validator failure ==")
 with tempfile.TemporaryDirectory() as temporary:
     root = Path(temporary)
