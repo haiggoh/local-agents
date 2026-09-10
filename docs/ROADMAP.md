@@ -128,28 +128,13 @@ that must still be run per promoted profile.
 **Status: NOT STARTED.** Both items are user-flagged high priority. Neither changes a schema or adds
 architecture, which is why they are a patch release and not gated behind anything.
 
-### Rapid-MLX upgrade to the current release
+### Rapid-MLX runtime lifecycle and current upgrade
 
-`LA_RAPID_BIN` is pinned to the qualified `0.12.18`. A side-by-side venv was built for `0.13.2` on
-2026-08-31 and never smoke-tested, so it never got promoted.
+**Rapid-MLX 0.14.0 is installed side by side and package/CLI validated.** The repository now needs a durable lifecycle rather than one-off per-release installers. `install/manage-rapid-mlx.py` owns release discovery, interactive exact-version selection, upgrades/downgrades, reproducible venv recreation, `--dry-run`, non-serving smoke inspection, transactional active-pin promotion, and guarded retirement. It lives on a dedicated feature branch with its own deterministic test and is mergeable once that test plus `smoke 0.14.0` pass.
 
-**Retarget to `0.13.4`** (latest on PyPI, uploaded 2026-09-03) rather than finishing the `0.13.2`
-promotion — `0.13.2` was never qualified, so there is no evidence to preserve by going through it, and
-promoting a superseded version means running the same smoke test twice.
+Installation promotes active Rapid pins by default after validation; `--skip-pin-update` preserves a deliberate install-only lane. Promotion is not model qualification. The remaining 0.14 acceptance gate is unchanged in substance: serve the target on a captured free port; verify `/v1/models`; run Anthropic Messages and structured-tool round trips; measure warm/cold and changed-prefix cache behavior; check concurrency and Metal headroom; then run the real Claude Code/Auto Mode smoke.
 
-What the promotion needs, unchanged from waypoint `promote-rapid-mlx-0-13-2-to`: serve a Qwen3.6/3.8
-4-bit on a free port (capture `SUCCESS_PORT`, never assume 8000); `GET /v1/models` shows the spoof id;
-one Anthropic `/v1/messages` round-trip; one structured tool call via `qwen3_coder_xml`; warm-vs-cold
-TTFT to confirm the hybrid prefix cache still engages; and an explicit concurrency check.
-
-**The dependency delta is the part not to skip.** `0.13.2` already moved `transformers` 5.12.1→5.15.1
-and `mlx` 0.31.2→0.32.2, and `0.13.4` must be re-checked rather than assumed equal. **`mlx` is the
-layer every Metal-ceiling figure was measured on**, so recorded Metal numbers are invalid until
-re-measured — they must not be carried across the upgrade. Retain `0.12.18` for at least 7 successful
-days; deleting it needs separate approval of exact paths.
-
-Homebrew remains rejected for this: it will not pin `mlx`. Reasons are on record in memory
-`rapid-mlx-venv-vs-homebrew` so they are not re-litigated.
+The dependency delta remains evidence-sensitive. Rapid 0.14.0 currently resolves MLX 0.32.2, MLX-LM 0.31.3, Transformers 5.15.1, and llguidance 1.8.0 on the reference machine. Recorded Metal/cache figures from older runtimes are baselines, not transferable qualification. Superseded venvs may be retired only after active pins move, no process uses them, and a valid exact recreation receipt exists. Model-weight deletion remains a separate reviewed decision.
 
 ### Locally routed Auto Mode correctness
 
@@ -636,12 +621,7 @@ No single release may become several releases at once.
 
 Tracked as waypoints; listed here so the repo is not silent about them.
 
-- **Rapid-MLX `0.13.2` is installed side-by-side but not promoted.** `LA_RAPID_BIN` stays pinned to
-  the qualified `0.12.18`. Promotion needs a serve-level smoke test (including a warm-vs-cold TTFT
-  check and an explicit concurrency check), and `0.12.18` is retained for 7 successful days after.
-  Note `0.13.2` moves `transformers` 5.12.1→5.15.1 and `mlx` 0.31.2→0.32.2, and **`mlx` is the layer
-  the Metal-ceiling evidence measures** — so recorded Metal figures must be re-measured, not carried
-  over. Waypoint: `promote-rapid-mlx-0-13-2-to`.
+- **Rapid runtime promotion is now managed but 0.14 runtime qualification remains open.** The version manager can recreate superseded venvs from exact receipts and transactionally promote active pins, but a successful install/CLI smoke does not replace serve-level protocol, cache, concurrency, Metal, and real-session evidence. Keep rollback environments until those gates pass; retire them only when unpinned, inactive, and reproducible.
 - **Non-Qwen models default to Rapid without Rapid evidence.** `0.13.1` moved them to the default
   because that is what a default means; only the Qwen3.6/3.8 aliases are runtime-qualified there.
   Rapid's parser vocabulary does cover them, so this is a qualification gap, not a known

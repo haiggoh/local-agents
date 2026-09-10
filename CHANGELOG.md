@@ -15,6 +15,8 @@ is not qualification.
 
 ### Added
 
+- `install/manage-rapid-mlx.py`, a repository-owned Rapid runtime manager with PyPI release discovery, interactive version selection, exact upgrades/downgrades, side-by-side reproducible venvs, private dependency-lock receipts, non-serving CLI smoke inspection, transactional active-pin promotion, guarded retirement, and `--dry-run`/`--help` support. Installation promotes active pins by default; `--skip-pin-update` keeps installation separate when required. Covered by `tests/test_manage_rapid_mlx.py` and documented in `docs/RAPID_RUNTIME_MANAGER.md`.
+
 - Auto Mode classifier readiness gate for local sessions. A private fixture
   engine captures a genuine classifier request, measures cache readiness, and
   every launch replays it before the session opens, so a local Auto Mode session
