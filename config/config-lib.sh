@@ -347,7 +347,7 @@ la_load_config() {
   # Devstral Small 2 24B is the current leading candidate; see the launcher
   # header for the measured evidence. Cache and fixtures are isolated from
   # generic Rapid sessions and from oMLX.
-  : "${LA_RAPID_AUTO_BIN:=$HOME/.venvs/rapid-mlx-0.13.4/bin/rapid-mlx}"
+  : "${LA_RAPID_AUTO_BIN:=$HOME/.venvs/rapid-mlx-0.14.0/bin/rapid-mlx}"
   : "${LA_RAPID_AUTO_MODEL_DIR:=$LA_MODELS_DIR/Qwen3.6-35B-A3B-4bit}"
   : "${LA_RAPID_AUTO_CLASSIFIER_MODEL_ID:=claude-sonnet-5}"
   : "${LA_RAPID_AUTO_PORT:=8002}"
