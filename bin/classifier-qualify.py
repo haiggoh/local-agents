@@ -569,6 +569,11 @@ def run_stage2(
     warm_reuse_passes = 0
     warm_reuse_unmeasured = 0
     deadline_failures: list[float] = []
+    # An HTTP failure is a RUNTIME fault, never a contract violation. Measured
+    # 2026-09-10: a Metal out-of-memory mid-suite returned 500 and the run was
+    # reported as CONTRACT_FAIL, i.e. the MODEL was blamed for the machine
+    # running out of GPU memory. Same family as the unmeasured-vs-failed bug.
+    http_failures: list[dict[str, Any]] = []
 
     for index in range(warm_runs):
         warm = helper.replay_fixture(
@@ -578,6 +583,14 @@ def run_stage2(
             server_log=server_log,
         )
         runs.append(describe_run(f"warm_{index + 1}", warm))
+
+        status = warm.get("http_status")
+
+        if not (isinstance(status, int) and 200 <= status < 300):
+            http_failures.append(
+                {"run": f"warm_{index + 1}", "http_status": status}
+            )
+            continue
 
         if warm.get("classifier_contract_valid"):
             contract_passes += 1
@@ -614,7 +627,21 @@ def run_stage2(
         "warm_reuse_unmeasured": warm_reuse_unmeasured,
         "warm_deadline_seconds": WARM_DEADLINE_SECONDS,
         "warm_deadline_failures": deadline_failures,
+        "http_failures": http_failures,
     }
+
+    # Runtime faults are adjudicated FIRST: a 500 makes every later tally
+    # meaningless, and reporting a contract or cache verdict on top of it would
+    # attribute an environment failure to the candidate.
+    if http_failures:
+        summary["outcome"] = "RUNTIME_OR_CONTEXT_FAIL"
+        summary["detail"] = (
+            f"the backend returned an HTTP failure on {len(http_failures)} "
+            f"run(s): {http_failures}. This is a RUNTIME fault (e.g. a Metal "
+            "out-of-memory under pressure), not a model verdict — the "
+            "candidate is not judged on it. Re-run with more headroom."
+        )
+        return summary
 
     if contract_passes < total_runs:
         summary["outcome"] = "CONTRACT_FAIL"

@@ -586,6 +586,38 @@ def main() -> int:
             "the detail names run B specifically as the unmeasured one",
         )
 
+        print("== an HTTP fault is a RUNTIME fault, not a model verdict ==")
+        # Regression for a defect found on REAL hardware 2026-09-10: a Metal
+        # out-of-memory returned 500 on warm_4 and Stage 2 reported
+        # CONTRACT_FAIL, blaming the model for the machine running out of GPU
+        # memory. Script four healthy runs then a 500, exactly as measured.
+        code, report, _ = run(
+            tmp,
+            [
+                (200, verdict_response(), log(28073, 28073)),
+                (200, verdict_response(), log(28073, 28073)),
+                (200, verdict_response(), log(28073, 28073)),
+                (200, verdict_response(), log(28073, 28073)),
+                (200, verdict_response(), log(28073, 28073)),
+                (500, b'{"error":"Metal out of memory"}', log(28073, 28073)),
+            ],
+            ["--warm-runs", "5"],
+            stage=2,
+        )
+        check(
+            report["stage2"]["outcome"] == "RUNTIME_OR_CONTEXT_FAIL",
+            "a mid-suite HTTP 500 is RUNTIME_OR_CONTEXT_FAIL, never CONTRACT_FAIL",
+        )
+        check(
+            report["stage2"]["http_failures"]
+            and report["stage2"]["http_failures"][0]["http_status"] == 500,
+            "the failing run and its status are recorded for diagnosis",
+        )
+        check(
+            "not a model verdict" in report["stage2"].get("detail", ""),
+            "the detail states explicitly that the candidate is not judged on it",
+        )
+
         print("== reporting honesty ==")
         code, report, _ = run(
             tmp,
