@@ -112,30 +112,40 @@ class StubBackend:
         return f"http://{host}:{port}"
 
 
-def write_fixture(path: Path, messages: list[dict]) -> None:
-    """Write a fixture in the REAL capture schema.
+def write_fixture(
+    path: Path,
+    messages: list[dict],
+    *,
+    stage: int = 1,
+    extra: dict | None = None,
+) -> bytes:
+    """Write a stage-identifiable fixture in the real capture schema."""
+    request = {
+        "model": "claude-sonnet-5",
+        "messages": messages,
+        "max_tokens": 64 if stage == 1 else 8192,
+    }
 
-    load_fixture enforces schema_version, method == POST, and a body_sha256 that
-    matches the payload. Writing a loose approximation here would test nothing:
-    the fixture would be rejected before any request was sent.
-    """
-    body = json.dumps(
-        {"model": "claude-sonnet-5", "messages": messages}
-    ).encode()
-    path.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "method": "POST",
-                "path": "/v1/messages",
-                "headers": {"content-type": "application/json"},
-                "body_base64": base64.b64encode(body).decode("ascii"),
-                "body_sha256": hashlib.sha256(body).hexdigest(),
-                "body_bytes": len(body),
-            }
-        ),
-        encoding="utf-8",
-    )
+    if stage == 1:
+        request["stop_sequences"] = [
+            f"{chr(60)}/severity{chr(62)}"
+        ]
+
+    if extra:
+        request.update(extra)
+
+    body = json.dumps(request).encode()
+    fixture = {
+        "schema_version": 1,
+        "method": "POST",
+        "path": "/v1/messages",
+        "headers": {"content-type": "application/json"},
+        "body_base64": base64.b64encode(body).decode("ascii"),
+        "body_sha256": hashlib.sha256(body).hexdigest(),
+        "body_bytes": len(body),
+    }
+    path.write_text(json.dumps(fixture), encoding="utf-8")
+    return body
 
 
 def log(cached: int, prompt: int) -> str:
@@ -149,21 +159,31 @@ def run(
     fixture_messages=None,
     stage: int = 1,
 ):
-    """Drive the framework against the stub backend for ONE stage.
-
-    The stage is passed explicitly rather than inferred from argv: inferring it
-    silently sent every case to Stage 1 and the assertions then read a None
-    stage2, which is a test bug that looks like a framework bug.
-    """
+    """Drive the framework against the stub backend for one stage."""
     log_path = tmp / "server.log"
     fixture = tmp / "fixture.json"
-    write_fixture(
-        fixture,
-        fixture_messages
-        if fixture_messages is not None
-        else [{"role": "user", "content": "classify this action"}],
-    )
+    messages = fixture_messages
+
+    if messages is None:
+        if stage == 1:
+            messages = [
+                {"role": "assistant", "content": "classifier context"},
+                {"role": "user", "content": "classify this action"},
+            ]
+        else:
+            messages = [
+                {"role": "user", "content": "classify this action"}
+            ]
+
+    write_fixture(fixture, messages, stage=stage)
     flag = "--stage1-fixture" if stage == 1 else "--stage2-fixture"
+    extras = list(argv_extra or [])
+
+    if stage == 1 and not any(
+        item in {"--stage1-fixture-b", "--stage1-synthetic-b"}
+        for item in extras
+    ):
+        extras.append("--stage1-synthetic-b")
 
     with StubBackend(script, log_path) as backend:
         report_path = tmp / "report.json"
@@ -179,7 +199,7 @@ def run(
                 str(report_path),
                 flag,
                 str(fixture),
-                *(argv_extra or []),
+                *extras,
             ]
         )
         report = json.loads(report_path.read_text())
@@ -447,7 +467,14 @@ def main() -> int:
         print("== Stage 1: contract violations ==")
         code, report, _ = run(
             tmp,
-            [(200, b'{"type":"message","content":[{"type":"text","text":"maybe unsafe?"}]}', log(0, 100))],
+            [
+                (
+                    200,
+                    b'{"type":"message","content":'
+                    b'[{"type":"text","text":"maybe unsafe?"}]}',
+                    log(0, 100),
+                )
+            ],
             [],
         )
         check(
@@ -498,7 +525,14 @@ def main() -> int:
         # rendered as a confident model verdict.
         log_path = tmp / "nolog.log"
         fixture = tmp / "nolog-fixture.json"
-        write_fixture(fixture, [{"role": "user", "content": "classify"}])
+        write_fixture(
+            fixture,
+            [
+                {"role": "assistant", "content": "context"},
+                {"role": "user", "content": "classify"},
+            ],
+            stage=1,
+        )
 
         with StubBackend(
             [(200, verdict_response(), None)],
@@ -515,6 +549,7 @@ def main() -> int:
                     str(report_path),
                     "--stage1-fixture",
                     str(fixture),
+                    "--stage1-synthetic-b",
                 ]
             )
             nolog = json.loads(report_path.read_text())
@@ -530,6 +565,12 @@ def main() -> int:
         check(
             "UNJUDGED" in nolog["stage1"].get("detail", ""),
             "the unmeasured detail calls the candidate UNJUDGED",
+        )
+
+        write_fixture(
+            fixture,
+            [{"role": "user", "content": "classify"}],
+            stage=2,
         )
 
         with StubBackend(
@@ -636,6 +677,7 @@ def main() -> int:
                 str(tmp / "unjudged.json"),
                 "--stage1-fixture",
                 str(tmp / "missing-fixture.json"),
+                "--stage1-synthetic-b",
             ]
         )
         check(
@@ -656,6 +698,480 @@ def main() -> int:
             judged_report["stage1"]["outcome"] == "EXACT_ONLY"
             and code_judged == 1,
             "a JUDGED failure exits 1, distinct from the unjudged 3",
+        )
+
+        print("== explicit Stage-1 B mode is mandatory and exclusive ==")
+        mode_fixture_a = tmp / "mode-a.json"
+        mode_fixture_b = tmp / "mode-b.json"
+        write_fixture(
+            mode_fixture_a,
+            [
+                {"role": "assistant", "content": "context"},
+                {"role": "user", "content": "A"},
+            ],
+            stage=1,
+        )
+        write_fixture(
+            mode_fixture_b,
+            [
+                {"role": "assistant", "content": "context"},
+                {"role": "user", "content": "B"},
+            ],
+            stage=1,
+        )
+
+        for label, mode_args in (
+            ("missing", []),
+            (
+                "both",
+                [
+                    "--stage1-fixture-b",
+                    str(mode_fixture_b),
+                    "--stage1-synthetic-b",
+                ],
+            ),
+        ):
+            mode_log = tmp / f"mode-{label}.log"
+
+            with StubBackend(
+                [(200, verdict_response(), log(0, 1))],
+                mode_log,
+            ) as backend:
+                try:
+                    cq.main(
+                        [
+                            "--candidate",
+                            "stub",
+                            "--backend-url",
+                            backend.url,
+                            "--stage1-fixture",
+                            str(mode_fixture_a),
+                            *mode_args,
+                        ]
+                    )
+                except SystemExit as exc:
+                    mode_code = exc.code
+                else:
+                    mode_code = 0
+
+                mode_requests = len(backend.received)
+
+            check(
+                mode_code == 2 and mode_requests == 0,
+                f"{label} B mode is rejected before backend contact",
+            )
+
+        print("== strict fixture stage identity: zero backend contact ==")
+        stage1_fixture = tmp / "identity-stage1.json"
+        stage2_fixture = tmp / "identity-stage2.json"
+        write_fixture(
+            stage1_fixture,
+            [
+                {"role": "assistant", "content": "context"},
+                {"role": "user", "content": "classify"},
+            ],
+            stage=1,
+        )
+        write_fixture(
+            stage2_fixture,
+            [{"role": "user", "content": "classify"}],
+            stage=2,
+        )
+
+        for label, flag, fixture_path, extra in (
+            (
+                "Stage-1 fixture supplied as Stage 2",
+                "--stage2-fixture",
+                stage1_fixture,
+                [],
+            ),
+            (
+                "Stage-2 fixture supplied as Stage 1",
+                "--stage1-fixture",
+                stage2_fixture,
+                ["--stage1-synthetic-b"],
+            ),
+        ):
+            slug = label.replace(" ", "-")
+            mismatch_log = tmp / f"{slug}.log"
+            mismatch_report = tmp / f"{slug}.json"
+
+            with StubBackend(
+                [(200, verdict_response(), log(0, 1))],
+                mismatch_log,
+            ) as backend:
+                mismatch_code = cq.main(
+                    [
+                        "--candidate",
+                        "stub",
+                        "--backend-url",
+                        backend.url,
+                        "--json",
+                        str(mismatch_report),
+                        flag,
+                        str(fixture_path),
+                        *extra,
+                    ]
+                )
+                mismatch_requests = len(backend.received)
+
+            mismatch = json.loads(mismatch_report.read_text())
+            check(
+                mismatch_code == 3
+                and mismatch["outcome"] == "HARNESS_FAILURE",
+                f"{label} is an unjudged harness failure",
+            )
+            check(
+                mismatch_requests == 0,
+                f"{label} makes zero backend requests",
+            )
+
+        malformed_fixture = tmp / "identity-malformed-stage1.json"
+        write_fixture(
+            malformed_fixture,
+            [
+                {"role": "assistant", "content": "context"},
+                {"role": "user", "content": "classify"},
+            ],
+            stage=1,
+            extra={"max_tokens": 65},
+        )
+        malformed_log = tmp / "identity-malformed.log"
+        malformed_report = tmp / "identity-malformed.json"
+
+        with StubBackend(
+            [(200, verdict_response(), log(0, 1))],
+            malformed_log,
+        ) as backend:
+            malformed_code = cq.main(
+                [
+                    "--candidate",
+                    "stub",
+                    "--backend-url",
+                    backend.url,
+                    "--json",
+                    str(malformed_report),
+                    "--stage1-fixture",
+                    str(malformed_fixture),
+                    "--stage1-synthetic-b",
+                ]
+            )
+            malformed_requests = len(backend.received)
+
+        check(
+            malformed_code == 3 and malformed_requests == 0,
+            "malformed stage metadata fails with zero backend contact",
+        )
+
+        print("== genuine Stage-1 A/B provenance and exact replay ==")
+        genuine_a = tmp / "genuine-a.json"
+        genuine_b = tmp / "genuine-b.json"
+        body_a = write_fixture(
+            genuine_a,
+            [
+                {"role": "assistant", "content": "context"},
+                {"role": "user", "content": "classify A"},
+            ],
+            stage=1,
+        )
+        body_b = write_fixture(
+            genuine_b,
+            [
+                {"role": "assistant", "content": "context"},
+                {"role": "user", "content": "classify changed B"},
+            ],
+            stage=1,
+        )
+        genuine_log = tmp / "genuine.log"
+        genuine_report = tmp / "genuine.json"
+
+        with StubBackend(
+            [
+                (200, verdict_response(), log(0, 38244)),
+                (200, verdict_response(), log(38244, 38244)),
+                (200, verdict_response(), log(37808, 38244)),
+            ],
+            genuine_log,
+        ) as backend:
+            genuine_code = cq.main(
+                [
+                    "--candidate",
+                    "stub",
+                    "--backend-url",
+                    backend.url,
+                    "--server-log",
+                    str(genuine_log),
+                    "--json",
+                    str(genuine_report),
+                    "--stage1-fixture",
+                    str(genuine_a),
+                    "--stage1-fixture-b",
+                    str(genuine_b),
+                ]
+            )
+            genuine_received = list(backend.received)
+
+        genuine = json.loads(genuine_report.read_text())
+        check(
+            genuine_code == 0
+            and genuine_received == [body_a, body_a, body_b],
+            "genuine A/B sends exact A, exact A, then exact B bytes",
+        )
+        check(
+            genuine["stage1"]["changed_request_source"]
+            == "genuine_fixture_b"
+            and genuine["stage1"]["synthetic_b"] is False
+            and genuine["stage1"]["fixture_a_sha256"]
+            == hashlib.sha256(body_a).hexdigest()
+            and genuine["stage1"]["fixture_b_sha256"]
+            == hashlib.sha256(body_b).hexdigest(),
+            "genuine B provenance and both fixture hashes are reported",
+        )
+        check(
+            any(
+                "captured fixture B" in item
+                for item in genuine["proves"]
+            )
+            and not any(
+                "changed B was synthesized" in item
+                for item in genuine["does_not_prove"]
+            ),
+            "genuine A/B reporting claims only captured-B evidence",
+        )
+
+        print("== genuine B receives the opt-in adapter independently ==")
+        adapted_a = tmp / "adapted-a.json"
+        adapted_b = tmp / "adapted-b.json"
+        adapted_a_body = write_fixture(
+            adapted_a,
+            [
+                {"role": "user", "content": "A1"},
+                {"role": "user", "content": "A2"},
+            ],
+            stage=1,
+        )
+        adapted_b_body = write_fixture(
+            adapted_b,
+            [
+                {"role": "user", "content": "B1"},
+                {"role": "user", "content": "B2"},
+            ],
+            stage=1,
+        )
+        expected_a, expected_a_changed = (
+            cq.merge_adjacent_user_messages(adapted_a_body)
+        )
+        expected_b, expected_b_changed = (
+            cq.merge_adjacent_user_messages(adapted_b_body)
+        )
+        adapted_log = tmp / "adapted-genuine.log"
+        adapted_report = tmp / "adapted-genuine.json"
+
+        with StubBackend(
+            [
+                (400, b'{"error":"alternation"}', None),
+                (200, verdict_response(), log(0, 38244)),
+                (200, verdict_response(), log(38244, 38244)),
+                (200, verdict_response(), log(37808, 38244)),
+            ],
+            adapted_log,
+        ) as backend:
+            adapted_code = cq.main(
+                [
+                    "--candidate",
+                    "stub",
+                    "--backend-url",
+                    backend.url,
+                    "--server-log",
+                    str(adapted_log),
+                    "--json",
+                    str(adapted_report),
+                    "--stage1-fixture",
+                    str(adapted_a),
+                    "--stage1-fixture-b",
+                    str(adapted_b),
+                    "--merge-adjacent-user-messages",
+                ]
+            )
+            adapted_received = list(backend.received)
+
+        check(
+            expected_a_changed
+            and expected_b_changed
+            and adapted_code == 0
+            and adapted_received
+            == [adapted_a_body, expected_a, expected_a, expected_b],
+            "adapter sends exact independently adapted genuine A and B bytes",
+        )
+
+        print("== synthetic-B reporting honesty ==")
+        synthetic_code, synthetic_report, _ = run(
+            tmp,
+            [
+                (200, verdict_response(), log(0, 38244)),
+                (200, verdict_response(), log(38244, 38244)),
+                (200, verdict_response(), log(37808, 38244)),
+            ],
+            ["--stage1-synthetic-b"],
+        )
+        check(
+            synthetic_code == 0
+            and synthetic_report["stage1"]["changed_request_source"]
+            == "synthetic_tail_growth"
+            and synthetic_report["stage1"]["synthetic_b"] is True
+            and synthetic_report["stage1"]["fixture_b_sha256"] is None,
+            "synthetic B is explicit and truthfully labeled",
+        )
+        check(
+            any(
+                "changed B was synthesized" in item
+                for item in synthetic_report["does_not_prove"]
+            )
+            and not any(
+                "captured fixture B" in item
+                for item in synthetic_report["proves"]
+            ),
+            "synthetic B cannot be reported as genuine A/B evidence",
+        )
+        check(
+            "genuine request unmodified"
+            not in synthetic_report["outcome_meaning"],
+            "synthetic DIRECT_PASS wording does not claim unmodified evidence",
+        )
+
+        print("== evidence-driven proves reporting ==")
+        no_stage_report = cq.build_report(
+            candidate="stub",
+            stage1=None,
+            stage2=None,
+        )
+        check(
+            no_stage_report["proves"] == [],
+            "a preflight HARNESS_FAILURE proves nothing",
+        )
+        check(
+            "  (none)" in cq.render_text(no_stage_report),
+            "an empty proves list renders explicitly as none",
+        )
+
+        contract_fail_report = cq.build_report(
+            candidate="stub",
+            stage1={
+                "outcome": "CONTRACT_FAIL",
+                "runs": [
+                    {
+                        "label": "cold_A",
+                        "http_status": 200,
+                        "contract_valid": False,
+                    }
+                ],
+                "changed_request_source": "synthetic_tail_growth",
+            },
+            stage2=None,
+        )
+        check(
+            not any(
+                "response contract held" in item
+                for item in contract_fail_report["proves"]
+            ),
+            "CONTRACT_FAIL does not claim response-contract conformance",
+        )
+
+        exact_only_report = cq.build_report(
+            candidate="stub",
+            stage1={
+                "outcome": "EXACT_ONLY",
+                "runs": [
+                    {
+                        "label": "cold_A",
+                        "http_status": 200,
+                        "contract_valid": True,
+                    },
+                    {
+                        "label": "exact_A",
+                        "http_status": 200,
+                        "contract_valid": True,
+                    },
+                    {
+                        "label": "changed_B",
+                        "http_status": 200,
+                        "contract_valid": True,
+                    },
+                ],
+                "exact_reuse_percent": 100.0,
+                "changed_reuse_percent": 0.0,
+                "changed_request_source": "synthetic_tail_growth",
+            },
+            stage2=None,
+        )
+        check(
+            "Stage-1 exact-prefix cache reuse was measured"
+            in exact_only_report["proves"]
+            and "Stage-1 changed-prefix cache reuse was measured"
+            in exact_only_report["proves"],
+            "EXACT_ONLY reports measured cache evidence",
+        )
+        check(
+            not any(
+                "met the configured threshold" in item
+                for item in exact_only_report["proves"]
+            ),
+            "EXACT_ONLY does not claim the changed-prefix threshold passed",
+        )
+
+        stage2_cache_fail_report = cq.build_report(
+            candidate="stub",
+            stage1=None,
+            stage2={
+                "outcome": "CACHE_OR_LATENCY_FAIL",
+                "contract_passes": 3,
+                "contract_required": 3,
+                "warm_reuse_passes": 0,
+                "warm_reuse_required": 2,
+                "warm_reuse_unmeasured": 0,
+                "warm_deadline_failures": [],
+                "runs": [],
+            },
+        )
+        check(
+            "Stage-2 warm cache reuse was measured"
+            in stage2_cache_fail_report["proves"],
+            "Stage-2 cache failure reports that reuse was measured",
+        )
+        check(
+            not any(
+                "warm cache reuse met" in item
+                for item in stage2_cache_fail_report["proves"]
+            )
+            and not any(
+                "latency stayed inside" in item
+                for item in stage2_cache_fail_report["proves"]
+            ),
+            "Stage-2 cache failure claims neither threshold nor deadline pass",
+        )
+
+        stage2_pass_report = cq.build_report(
+            candidate="stub",
+            stage1=None,
+            stage2={
+                "outcome": "DIRECT_PASS",
+                "contract_passes": 5,
+                "contract_required": 5,
+                "warm_reuse_passes": 4,
+                "warm_reuse_required": 4,
+                "warm_reuse_unmeasured": 0,
+                "warm_deadline_failures": [],
+                "runs": [],
+            },
+        )
+        check(
+            "Stage-2 response contract held on every required run"
+            in stage2_pass_report["proves"]
+            and "Stage-2 warm cache reuse met the configured threshold"
+            in stage2_pass_report["proves"]
+            and "Stage-2 warm latency stayed inside the classifier deadline"
+            in stage2_pass_report["proves"],
+            "Stage-2 DIRECT_PASS reports contract, cache, and deadline success",
         )
 
         print("== reporting honesty ==")

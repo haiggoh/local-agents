@@ -42,6 +42,7 @@ import json
 import shutil
 import sys
 import tempfile
+import urllib.parse
 from pathlib import Path
 from typing import Any
 
@@ -72,8 +73,9 @@ OUTCOMES = (
 
 OUTCOME_MEANING = {
     "DIRECT_PASS": (
-        "Every gate passed with the genuine request unmodified. The only "
-        "outcome that needs no caveat when reported."
+        "Every requested gate passed without a request adapter. Check the "
+        "Stage-1 changed-request source before describing the evidence as "
+        "genuine A/B."
     ),
     "MODEL_PASS_WITH_ADAPTER": (
         "The model itself passed, but only after a semantics-preserving "
@@ -128,6 +130,103 @@ def load_prewarm_helper(repo: Path) -> Any:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def fixture_body_sha256(helper: Any, fixture: Path) -> str:
+    """Return the verified captured-body identity for report provenance."""
+    _, _, body = helper.load_fixture(fixture)
+    return helper.sha256_bytes(body)
+
+
+def validate_fixture_stage(
+    helper: Any,
+    fixture: Path,
+    expected_stage: int,
+) -> None:
+    """Reject a mislabeled classifier fixture before backend contact."""
+    request_path, _, body = helper.load_fixture(fixture)
+    request_path = urllib.parse.urlsplit(request_path).path
+
+    if request_path != "/v1/messages":
+        raise RuntimeError(
+            f"{fixture}: classifier fixture path must be /v1/messages"
+        )
+
+    try:
+        request = json.loads(body)
+    except Exception as exc:
+        raise RuntimeError(
+            f"{fixture}: request body is not valid JSON"
+        ) from exc
+
+    if not isinstance(request, dict):
+        raise RuntimeError(
+            f"{fixture}: request body must be a JSON object"
+        )
+
+    messages = request.get("messages")
+    max_tokens = request.get("max_tokens")
+    stop_sequences = request.get("stop_sequences")
+    tools = request.get("tools")
+
+    if not isinstance(messages, list) or not all(
+        isinstance(message, dict) for message in messages
+    ):
+        raise RuntimeError(
+            f"{fixture}: messages must be a list of objects"
+        )
+
+    if expected_stage == 1:
+        severity_close = f"{chr(60)}/severity{chr(62)}"
+
+        if max_tokens != 64:
+            raise RuntimeError(
+                f"{fixture}: Stage 1 requires max_tokens=64, "
+                f"got {max_tokens!r}"
+            )
+
+        if len(messages) < 2:
+            raise RuntimeError(
+                f"{fixture}: Stage 1 requires a segmented "
+                "multi-message request"
+            )
+
+        if not (
+            isinstance(stop_sequences, list)
+            and severity_close in stop_sequences
+        ):
+            raise RuntimeError(
+                f"{fixture}: Stage 1 requires the severity closing "
+                "stop sequence"
+            )
+
+        return
+
+    if expected_stage == 2:
+        if max_tokens != 8192:
+            raise RuntimeError(
+                f"{fixture}: Stage 2 requires max_tokens=8192, "
+                f"got {max_tokens!r}"
+            )
+
+        if len(messages) != 1:
+            raise RuntimeError(
+                f"{fixture}: Stage 2 requires exactly one message"
+            )
+
+        if "stop_sequences" in request:
+            raise RuntimeError(
+                f"{fixture}: Stage 2 must not contain stop_sequences"
+            )
+
+        if tools not in (None, []):
+            raise RuntimeError(
+                f"{fixture}: Stage 2 must not contain tools"
+            )
+
+        return
+
+    raise ValueError(f"unsupported classifier stage: {expected_stage}")
 
 
 def merge_adjacent_user_messages(body: bytes) -> tuple[bytes, bool]:
@@ -349,21 +448,42 @@ def run_stage1(
     helper: Any,
     *,
     fixture: Path,
+    fixture_b: Path | None,
+    synthetic_b: bool,
     backend_url: str,
     timeout: float,
     server_log: Path | None,
     scratch: Path,
     allow_adapter: bool,
 ) -> dict[str, Any]:
-    """cold A -> exact A -> changed B.
-
-    Run A twice on purpose: the first is cold (nothing cached) and the second
-    must hit an exact-prefix cache. Only then does B test whether reuse
-    survives a CHANGED prefix, which is the gate Qwen3.6 failed.
-    """
+    """Replay cold A, exact A, then an explicit genuine or synthetic B."""
     runs: list[dict[str, Any]] = []
     adapter_used = False
     active_fixture = fixture
+    fixture_b_sha256 = (
+        fixture_body_sha256(helper, fixture_b)
+        if fixture_b is not None
+        else None
+    )
+    provenance = {
+        "changed_request_source": (
+            "genuine_fixture_b"
+            if fixture_b is not None
+            else "synthetic_tail_growth"
+        ),
+        "fixture_a_sha256": fixture_body_sha256(helper, fixture),
+        "fixture_b_sha256": fixture_b_sha256,
+        "synthetic_b": synthetic_b,
+    }
+
+    def summary(**values: Any) -> dict[str, Any]:
+        return {
+            "stage": 1,
+            "runs": runs,
+            "adapter_used": adapter_used,
+            **provenance,
+            **values,
+        }
 
     cold = helper.replay_fixture(
         fixture_path=active_fixture,
@@ -372,15 +492,12 @@ def run_stage1(
         server_log=server_log,
     )
 
-    # An alternation rejection arrives as HTTP 400 before prefill. Retry once
-    # through the adapter so a harness mismatch is not recorded as a model
-    # failure — but only when explicitly allowed.
     if cold.get("http_status") == 400 and allow_adapter:
         _, _, body = helper.load_fixture(fixture)
         adapted_body, changed = merge_adjacent_user_messages(body)
 
         if changed:
-            adapted = scratch / "stage1-adapted.json"
+            adapted = scratch / "stage1-adapted-a.json"
             write_variant_fixture(helper, fixture, adapted_body, adapted)
             retry = helper.replay_fixture(
                 fixture_path=adapted,
@@ -392,31 +509,27 @@ def run_stage1(
             if retry.get("http_status") == 200:
                 adapter_used = True
                 active_fixture = adapted
-                runs.append(describe_run("cold_A_rejected_unadapted", cold))
+                runs.append(
+                    describe_run("cold_A_rejected_unadapted", cold)
+                )
                 cold = retry
 
     runs.append(describe_run("cold_A", cold))
 
     if cold.get("http_status") != 200:
-        return {
-            "stage": 1,
-            "runs": runs,
-            "adapter_used": adapter_used,
-            "outcome": "RUNTIME_OR_CONTEXT_FAIL",
-            "detail": (
+        return summary(
+            outcome="RUNTIME_OR_CONTEXT_FAIL",
+            detail=(
                 "cold run A was refused by the backend "
                 f"(HTTP {cold.get('http_status')})"
             ),
-        }
+        )
 
     if not cold.get("classifier_contract_valid"):
-        return {
-            "stage": 1,
-            "runs": runs,
-            "adapter_used": adapter_used,
-            "outcome": "CONTRACT_FAIL",
-            "detail": "cold run A violated the classifier contract",
-        }
+        return summary(
+            outcome="CONTRACT_FAIL",
+            detail="cold run A violated the classifier contract",
+        )
 
     exact = helper.replay_fixture(
         fixture_path=active_fixture,
@@ -425,44 +538,73 @@ def run_stage1(
         server_log=server_log,
     )
     runs.append(describe_run("exact_A", exact))
-
     exact_reuse = reuse_percent(
         exact.get("cached_tokens"),
         exact.get("prompt_tokens"),
     )
 
-    if exact.get("http_status") != 200 or not exact.get(
-        "classifier_contract_valid"
-    ):
-        return {
-            "stage": 1,
-            "runs": runs,
-            "adapter_used": adapter_used,
-            "outcome": "CONTRACT_FAIL",
-            "detail": "exact replay A did not hold the contract",
-        }
-
-    _, _, active_body = helper.load_fixture(active_fixture)
-    grown_body, grown = grow_request_prefix(
-        active_body,
-        "<system-reminder>changed-prefix qualification probe</system-reminder>",
-    )
-
-    if not grown:
-        return {
-            "stage": 1,
-            "runs": runs,
-            "adapter_used": adapter_used,
-            "exact_reuse_percent": exact_reuse,
-            "outcome": "HARNESS_FAILURE",
-            "detail": (
-                "could not construct a grown-prefix variant from the fixture, "
-                "so changed-prefix reuse was never measured"
+    if exact.get("http_status") != 200:
+        return summary(
+            exact_reuse_percent=exact_reuse,
+            outcome="RUNTIME_OR_CONTEXT_FAIL",
+            detail=(
+                "exact replay A failed at runtime "
+                f"(HTTP {exact.get('http_status')})"
             ),
-        }
+        )
 
-    changed_fixture = scratch / "stage1-changed-b.json"
-    write_variant_fixture(helper, active_fixture, grown_body, changed_fixture)
+    if not exact.get("classifier_contract_valid"):
+        return summary(
+            exact_reuse_percent=exact_reuse,
+            outcome="CONTRACT_FAIL",
+            detail="exact replay A did not hold the contract",
+        )
+
+    if fixture_b is not None:
+        changed_fixture = fixture_b
+
+        if adapter_used:
+            _, _, body_b = helper.load_fixture(fixture_b)
+            adapted_b_body, changed_b = merge_adjacent_user_messages(
+                body_b
+            )
+
+            if changed_b:
+                adapted_b = scratch / "stage1-adapted-b.json"
+                write_variant_fixture(
+                    helper,
+                    fixture_b,
+                    adapted_b_body,
+                    adapted_b,
+                )
+                changed_fixture = adapted_b
+    else:
+        _, _, active_body = helper.load_fixture(active_fixture)
+        left, right = chr(60), chr(62)
+        marker = (
+            f"{left}system-reminder{right}"
+            "changed-prefix qualification probe"
+            f"{left}/system-reminder{right}"
+        )
+        grown_body, grown = grow_request_prefix(active_body, marker)
+
+        if not grown:
+            return summary(
+                exact_reuse_percent=exact_reuse,
+                outcome="HARNESS_FAILURE",
+                detail=(
+                    "could not construct a grown-prefix variant from the "
+                    "fixture, so changed-prefix reuse was never measured"
+                ),
+            )
+
+        changed_fixture = scratch / "stage1-changed-b.json"
+        write_variant_fixture(
+            helper,
+            active_fixture,
+            grown_body,
+            changed_fixture,
+        )
 
     changed = helper.replay_fixture(
         fixture_path=changed_fixture,
@@ -471,53 +613,50 @@ def run_stage1(
         server_log=server_log,
     )
     runs.append(describe_run("changed_B", changed))
-
     changed_reuse = reuse_percent(
         changed.get("cached_tokens"),
         changed.get("prompt_tokens"),
     )
+    result = summary(
+        exact_reuse_percent=exact_reuse,
+        changed_reuse_percent=changed_reuse,
+    )
 
-    summary = {
-        "stage": 1,
-        "runs": runs,
-        "adapter_used": adapter_used,
-        "exact_reuse_percent": exact_reuse,
-        "changed_reuse_percent": changed_reuse,
-    }
-
-    if changed.get("http_status") != 200 or not changed.get(
-        "classifier_contract_valid"
-    ):
-        summary["outcome"] = "CONTRACT_FAIL"
-        summary["detail"] = "changed request B did not hold the contract"
-        return summary
-
-    # An ABSENT measurement is not a failed measurement. Without cache evidence
-    # (no --server-log, or a log whose format we cannot read) reuse is unknown,
-    # and reporting unknown as EXACT_ONLY would manufacture a confident model
-    # verdict out of missing instrumentation — the exact mistake this framework
-    # exists to prevent. Distinguish "measured a miss" from "did not measure".
-    if changed_reuse is None:
-        summary["outcome"] = "HARNESS_FAILURE"
-        summary["detail"] = (
-            "changed-prefix reuse was never MEASURED: no cache evidence was "
-            "recoverable for run B (pass --server-log pointing at the backend "
-            "log). The candidate is UNJUDGED — this is not an EXACT_ONLY "
-            "result and must not be reported as one."
+    if changed.get("http_status") != 200:
+        result["outcome"] = "RUNTIME_OR_CONTEXT_FAIL"
+        result["detail"] = (
+            "changed request B failed at runtime "
+            f"(HTTP {changed.get('http_status')})"
         )
-        return summary
+        return result
+
+    if not changed.get("classifier_contract_valid"):
+        result["outcome"] = "CONTRACT_FAIL"
+        result["detail"] = "changed request B did not hold the contract"
+        return result
+
+    if changed_reuse is None:
+        result["outcome"] = "HARNESS_FAILURE"
+        result["detail"] = (
+            "changed-prefix reuse was never MEASURED: no cache evidence "
+            "was recoverable for run B (pass --server-log pointing at the "
+            "backend log). The candidate is UNJUDGED — this is not an "
+            "EXACT_ONLY result and must not be reported as one."
+        )
+        return result
 
     if exact_reuse is None:
-        summary["outcome"] = "HARNESS_FAILURE"
-        summary["detail"] = (
-            "exact-replay reuse was never MEASURED, so a changed-prefix figure "
-            "has no baseline to be compared against. The candidate is UNJUDGED."
+        result["outcome"] = "HARNESS_FAILURE"
+        result["detail"] = (
+            "exact-replay reuse was never MEASURED, so a changed-prefix "
+            "figure has no baseline to be compared against. The candidate "
+            "is UNJUDGED."
         )
-        return summary
+        return result
 
     if changed_reuse < CHANGED_PREFIX_MIN_REUSE:
-        summary["outcome"] = "EXACT_ONLY"
-        summary["detail"] = (
+        result["outcome"] = "EXACT_ONLY"
+        result["detail"] = (
             "exact replay reused the cache but the CHANGED prefix did not "
             f"(measured {changed_reuse}%, need >= "
             f"{CHANGED_PREFIX_MIN_REUSE}%). This is the Qwen3.6 shape: a "
@@ -525,12 +664,12 @@ def run_stage1(
             "still recomputes the whole prompt. A live session grows its "
             "prefix every turn, so this candidate cannot serve one."
         )
-        return summary
+        return result
 
-    summary["outcome"] = (
+    result["outcome"] = (
         "MODEL_PASS_WITH_ADAPTER" if adapter_used else "DIRECT_PASS"
     )
-    return summary
+    return result
 
 
 def run_stage2(
@@ -704,6 +843,97 @@ def build_report(
     ):
         overall = "MODEL_PASS_WITH_ADAPTER"
 
+    proves: list[str] = []
+    does_not_prove = [
+        "verdict quality across safe/ambiguous/dangerous actions",
+        "cache persistence across backend restarts",
+        "coexistence with the CSL-selected main model",
+        "concurrency and memory-pressure behaviour",
+        "a real Claude Code Auto Mode session",
+        "adapter correctness for other traffic to the same backend",
+    ]
+
+    if stage1:
+        stage1_outcome = stage1.get("outcome")
+        stage1_runs = stage1.get("runs") or []
+        successful_runs = [
+            run
+            for run in stage1_runs
+            if isinstance(run.get("http_status"), int)
+            and 200 <= run["http_status"] < 300
+        ]
+
+        if (
+            successful_runs
+            and stage1_outcome != "CONTRACT_FAIL"
+            and all(run.get("contract_valid") for run in successful_runs)
+        ):
+            proves.append(
+                "Stage-1 response contract held on every successful run"
+            )
+
+        if stage1.get("exact_reuse_percent") is not None:
+            proves.append("Stage-1 exact-prefix cache reuse was measured")
+
+        changed_reuse = stage1.get("changed_reuse_percent")
+        changed_was_run = any(
+            run.get("label") == "changed_B" for run in stage1_runs
+        )
+
+        if changed_was_run and changed_reuse is not None:
+            proves.append("Stage-1 changed-prefix cache reuse was measured")
+
+            if changed_reuse >= CHANGED_PREFIX_MIN_REUSE:
+                proves.append(
+                    "Stage-1 changed-prefix reuse met the configured threshold"
+                )
+
+        changed_source = stage1.get("changed_request_source")
+
+        if changed_source == "genuine_fixture_b" and changed_was_run:
+            proves.append(
+                "Stage-1 changed-prefix evidence used captured fixture B"
+            )
+        elif changed_source == "synthetic_tail_growth":
+            does_not_prove.append(
+                "genuine Stage-1 A/B behavior; changed B was synthesized by "
+                "tail growth"
+            )
+
+    if stage2:
+        stage2_outcome = stage2.get("outcome")
+        contract_required = stage2.get("contract_required")
+        contract_passes = stage2.get("contract_passes")
+        warm_required = stage2.get("warm_reuse_required")
+        warm_passes = stage2.get("warm_reuse_passes")
+        warm_unmeasured = stage2.get("warm_reuse_unmeasured")
+
+        if (
+            isinstance(contract_required, int)
+            and contract_required > 0
+            and contract_passes == contract_required
+        ):
+            proves.append(
+                "Stage-2 response contract held on every required run"
+            )
+
+        if (
+            isinstance(warm_required, int)
+            and warm_required > 0
+            and warm_unmeasured == 0
+        ):
+            proves.append("Stage-2 warm cache reuse was measured")
+
+            if warm_passes == warm_required:
+                proves.append(
+                    "Stage-2 warm cache reuse met the configured threshold"
+                )
+
+        if stage2_outcome == "DIRECT_PASS":
+            proves.append(
+                "Stage-2 warm latency stayed inside the classifier deadline"
+            )
+
     return {
         "schema_version": SCHEMA_VERSION,
         "framework_version": FRAMEWORK_VERSION,
@@ -712,19 +942,8 @@ def build_report(
         "stage2": stage2,
         "outcome": overall,
         "outcome_meaning": OUTCOME_MEANING[overall],
-        "proves": [
-            "protocol conformance against a genuine captured request",
-            "exact-prefix and changed-prefix cache reuse",
-            "warm latency inside the classifier deadline",
-        ],
-        "does_not_prove": [
-            "verdict quality across safe/ambiguous/dangerous actions",
-            "cache persistence across backend restarts",
-            "coexistence with the CSL-selected main model",
-            "concurrency and memory-pressure behaviour",
-            "a real Claude Code Auto Mode session",
-            "adapter correctness for other traffic to the same backend",
-        ],
+        "proves": proves,
+        "does_not_prove": does_not_prove,
     }
 
 
@@ -743,6 +962,12 @@ def render_text(report: dict[str, Any]) -> str:
             continue
 
         lines.append(f"{key}: {stage.get('outcome')}")
+
+        if key == "stage1" and stage.get("changed_request_source"):
+            lines.append(
+                "  changed_request_source: "
+                f"{stage['changed_request_source']}"
+            )
 
         if stage.get("detail"):
             lines.append(f"  detail: {stage['detail']}")
@@ -768,6 +993,14 @@ def render_text(report: dict[str, Any]) -> str:
     lines.append(f"QUALIFICATION_VERDICT={report['outcome']}")
     lines.append(f"  {report['outcome_meaning']}")
     lines.append("")
+    lines.append("proves:")
+
+    if report["proves"]:
+        lines.extend(f"  - {item}" for item in report["proves"])
+    else:
+        lines.append("  (none)")
+
+    lines.append("")
     lines.append("does NOT prove:")
     lines.extend(f"  - {item}" for item in report["does_not_prove"])
     return "\n".join(lines)
@@ -788,7 +1021,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--stage1-fixture",
         type=Path,
-        help="genuine Stage-1 captured request fixture",
+        help="genuine Stage-1 captured request fixture A",
+    )
+    parser.add_argument(
+        "--stage1-fixture-b",
+        type=Path,
+        help="genuine changed Stage-1 captured request fixture B",
+    )
+    parser.add_argument(
+        "--stage1-synthetic-b",
+        action="store_true",
+        help=(
+            "explicitly synthesize changed B by growing fixture A at the tail"
+        ),
     )
     parser.add_argument(
         "--stage2-fixture",
@@ -840,6 +1085,18 @@ def main(argv: list[str] | None = None) -> int:
     if not args.stage1_fixture and not args.stage2_fixture:
         parser.error("at least one of --stage1-fixture / --stage2-fixture")
 
+    if args.stage1_fixture:
+        if bool(args.stage1_fixture_b) == bool(args.stage1_synthetic_b):
+            parser.error(
+                "Stage 1 requires exactly one of --stage1-fixture-b / "
+                "--stage1-synthetic-b"
+            )
+    elif args.stage1_fixture_b or args.stage1_synthetic_b:
+        parser.error(
+            "--stage1-fixture-b / --stage1-synthetic-b require "
+            "--stage1-fixture"
+        )
+
     if args.warm_runs < 1:
         parser.error("--warm-runs must be at least 1")
 
@@ -847,8 +1104,42 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         helper = load_prewarm_helper(repo)
+
+        if args.stage1_fixture:
+            validate_fixture_stage(helper, args.stage1_fixture, 1)
+
+            if args.stage1_fixture_b:
+                validate_fixture_stage(helper, args.stage1_fixture_b, 1)
+                fixture_a_sha256 = fixture_body_sha256(
+                    helper,
+                    args.stage1_fixture,
+                )
+                fixture_b_sha256 = fixture_body_sha256(
+                    helper,
+                    args.stage1_fixture_b,
+                )
+
+                if fixture_a_sha256 == fixture_b_sha256:
+                    raise RuntimeError(
+                        "Stage-1 fixture B must differ from fixture A"
+                    )
+
+        if args.stage2_fixture:
+            validate_fixture_stage(helper, args.stage2_fixture, 2)
     except Exception as exc:
-        print(f"HARNESS_FAILURE: {exc}", file=sys.stderr)
+        report = build_report(
+            candidate=args.candidate,
+            stage1=None,
+            stage2=None,
+        )
+        report["outcome"] = "HARNESS_FAILURE"
+        report["outcome_meaning"] = OUTCOME_MEANING["HARNESS_FAILURE"]
+        report["harness_error"] = str(exc)
+        print(render_text(report))
+
+        if args.json and "helper" in locals():
+            helper.atomic_private_json(args.json, report)
+
         return 3
 
     scratch = Path(tempfile.mkdtemp(prefix="classifier-qualify-"))
@@ -859,6 +1150,8 @@ def main(argv: list[str] | None = None) -> int:
             stage1 = run_stage1(
                 helper,
                 fixture=args.stage1_fixture,
+                fixture_b=args.stage1_fixture_b,
+                synthetic_b=args.stage1_synthetic_b,
                 backend_url=args.backend_url,
                 timeout=args.timeout,
                 server_log=args.server_log,
