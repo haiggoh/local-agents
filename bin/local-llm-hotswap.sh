@@ -39,6 +39,12 @@ if [ -z "$MODEL_NAME" ] || ! la_lookup "$MODEL_NAME"; then
 fi
 MODEL_DIR="$LA_CUR_DIR"; SPOOF_NAME="$LA_CUR_SPOOF"; SERVE="$LA_CUR_SERVE"
 TOOLP="$LA_CUR_TOOLP"; REASONP="$LA_CUR_REASONP"; THINK="$LA_CUR_THINK"
+RAPID_SPEC_CONFIG="$LA_CUR_RAPID_SPEC_CONFIG"
+RAPID_SPEC_CONFIG_SHA256="$(
+    printf '%s' "$RAPID_SPEC_CONFIG" |
+        /usr/bin/shasum -a 256 |
+        awk '{print $1}'
+)"
 SPOOF_PRIMARY="${SPOOF_NAME%%,*}"
 # State the backend BEFORE anything loads, and say where it came from. A generic `serve=mlx`
 # registration is resolved by config-lib to whatever LA_DEFAULT_MLX_BACKEND is, so without this
@@ -130,11 +136,13 @@ for ((port=LA_PORT_START; port<=LA_PORT_MAX; port++)); do
             _meta_backend=$(awk -F= '$1=="backend"{print substr($0,index($0,"=")+1)}' "$_meta" 2>/dev/null)
             _meta_alias=$(awk -F= '$1=="alias"{print substr($0,index($0,"=")+1)}' "$_meta" 2>/dev/null)
             _meta_model=$(awk -F= '$1=="model_dir"{print substr($0,index($0,"=")+1)}' "$_meta" 2>/dev/null)
+            _meta_spec=$(awk -F= '$1=="spec_config_sha256"{print substr($0,index($0,"=")+1)}' "$_meta" 2>/dev/null)
             _meta_pid=$(awk -F= '$1=="pid"{print $2}' "$_meta" 2>/dev/null)
             if [ "${LA_HOTSWAP_FORCE_FRESH:-0}" != "1" ] &&
                [ "$_meta_backend" = "rapid" ] &&
                [ "$_meta_alias" = "$MODEL_NAME" ] &&
                [ "$_meta_model" = "$MODEL_DIR" ] &&
+               [ "$_meta_spec" = "$RAPID_SPEC_CONFIG_SHA256" ] &&
                [ -n "$_listener_pid" ] &&
                [ "$_listener_pid" = "$_meta_pid" ] &&
                printf '%s\n' "$CURRENT_IDS" | grep -qxF "$SPOOF_PRIMARY"; then
@@ -215,9 +223,16 @@ if [ "$SERVE" = "rapid" ]; then
         --hybrid-cache-entries "$LA_RAPID_HYBRID_CACHE_ENTRIES"
         --timeout "$LA_SERVER_TIMEOUT_S"
         --no-mllm
-        --no-spec-decode
         --pflash "$LA_RAPID_PFLASH"
     )
+
+    if [ -n "$RAPID_SPEC_CONFIG" ]; then
+        RAPID_CMD+=(
+            --speculative-config "$RAPID_SPEC_CONFIG"
+        )
+    else
+        RAPID_CMD+=(--no-spec-decode)
+    fi
 
     case "$LA_RAPID_PIN_SYSTEM_PROMPT" in
         true|1|yes) RAPID_CMD+=(--pin-system-prompt) ;;
@@ -252,6 +267,7 @@ if [ "$SERVE" = "rapid" ]; then
         echo "alias=$MODEL_NAME"
         echo "model_dir=$MODEL_DIR"
         echo "served_id=$SPOOF_PRIMARY"
+        echo "spec_config_sha256=$RAPID_SPEC_CONFIG_SHA256"
         echo "pid=$RAPID_PID"
     } > "$RAPID_META_TMP"
     mv -f "$RAPID_META_TMP" "$RAPID_META"

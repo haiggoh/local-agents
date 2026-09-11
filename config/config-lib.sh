@@ -62,19 +62,21 @@ LA_MLX_BACKENDS="rapid vllm mlx_lm"
 # Parallel arrays keyed by insertion; la_lookup fills LA_* vars for a given alias.
 LA_ALIASES=()
 declare -A LA_SUBDIR LA_SERVE LA_SERVE_DECLARED LA_TOOLP LA_REASONP LA_THINK LA_SPOOF LA_EFFORT LA_ROLES LA_REPO LA_SIZE
+declare -A LA_RAPID_SPEC_CONFIG
 # Optional per-alias Claude Code auto-compaction overrides. csl applies
 # these only to the selected model's child launcher process.
 declare -A LA_SESSION_AUTO_COMPACT
 
 # la_register <alias> <subdir> <serve:mlx|rapid|vllm|mlx_lm|llama_cpp> <tool_parser> <reasoning_parser>
-#             <thinking:true|false> <spoof_id> <effort> [roles] [hf_repo] [size_gb]
-# reasoning_parser may be "" (none). The last three are OPTIONAL and additive, so pre-existing
+#             <thinking:true|false> <spoof_id> <effort> [roles] [hf_repo] [size_gb] [rapid_spec_json]
+# reasoning_parser may be "" (none). The last four are OPTIONAL and additive, so pre-existing
 # 8-field config lines keep working unchanged:
 #   roles    comma-separated role tags (see LA_CANONICAL_ROLES); "" = untagged (still launchable,
 #            just not offered by role in the resolver).
 #   hf_repo  Hugging Face repo id — lets the interactive installer download this model; "" = the
 #            installer won't manage it (you place the weights yourself).
 #   size_gb  approx download size, for the installer's disk/consent display; "" = unknown.
+#   rapid_spec_json  optional Rapid --speculative-config JSON; "" = force baseline decode.
 # Called once per model from the config file.
 la_register() {
   local alias="$1"
@@ -86,6 +88,7 @@ la_register() {
   LA_TOOLP[$alias]="$4"
   LA_REASONP[$alias]="$5"; LA_THINK[$alias]="$6"; LA_SPOOF[$alias]="$7"; LA_EFFORT[$alias]="$8"
   LA_ROLES[$alias]="${9:-}"; LA_REPO[$alias]="${10:-}"; LA_SIZE[$alias]="${11:-}"
+  LA_RAPID_SPEC_CONFIG[$alias]="${12:-}"
 }
 
 # --- retired aliases: a rename must not fail silently -------------------------
@@ -450,6 +453,7 @@ la_lookup() {
   LA_CUR_THINK="${LA_THINK[$a]}"
   LA_CUR_SPOOF="${LA_SPOOF[$a]}"
   LA_CUR_EFFORT="${LA_EFFORT[$a]}"
+  LA_CUR_RAPID_SPEC_CONFIG="${LA_RAPID_SPEC_CONFIG[$a]:-}"
   return 0
 }
 

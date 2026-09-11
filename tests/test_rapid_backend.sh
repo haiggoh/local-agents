@@ -156,7 +156,7 @@ chmod +x "$STUB"
 cat > "$SB/config/config.local.sh" <<CFG
 LA_MODELS_DIR="\$HOME/.models"
 LA_PORT_START=8100
-LA_PORT_MAX=8102
+LA_PORT_MAX=8104
 LA_RAPID_BIN="\$HOME/.stub/rapid-mlx"
 LA_RAPID_CACHE_MEMORY_MB=2048
 LA_RAPID_HYBRID_CACHE_ENTRIES=2
@@ -165,6 +165,7 @@ LA_RAPID_RELOCATE_MID_SYSTEM=true
 LA_RAPID_PFLASH=off
 la_register rapid-qwen     FakeModel rapid qwen qwen3 true  claude-opus-5 high "" "" 16
 la_register rapid-qwen-fast FakeModel rapid qwen ""    false claude-opus-5 low  "" "" 16
+la_register rapid-qwen-mtp FakeModel rapid qwen "" false claude-opus-5 high "" "" 16 '{"method":"mtp","model":"/tmp/fake-mtp","num_speculative_tokens":3}'
 la_register vllm-qwen      FakeModel vllm  qwen ""    false claude-opus-5 high "" "" 16
 CFG
 
@@ -229,6 +230,37 @@ assert_grep "--no-thinking" "$ARGS" "thinking OFF -> --no-thinking"
 assert_grep "--no-reasoning-parser" "$ARGS" "thinking OFF -> --no-reasoning-parser"
 if printf '%s' "$ARGS" | grep -qF -- "--reasoning-parser"; then check 1 "thinking OFF omits --reasoning-parser"; else check 0 "thinking OFF omits --reasoning-parser"; fi
 
+echo "== hotswap: per-alias MTP speculative config =="
+ARGV_FILE="$SB/argv-mtp.json"; rm -f "$ARGV_FILE"
+OUT=$(LA_HOTSWAP_FORCE_FRESH=1 run local-llm-hotswap.sh rapid-qwen-mtp)
+printf '%s' "$OUT" | grep -qF "SUCCESS_PORT="
+check $? "MTP alias launches on a free test port"
+python3 - "$ARGV_FILE" <<'PY_MTP_ARGV'
+import json
+import sys
+
+args = json.load(open(sys.argv[1], encoding="utf-8"))
+expected = (
+    '{"method":"mtp","model":"/tmp/fake-mtp",'
+    '"num_speculative_tokens":3}'
+)
+assert args.count("--speculative-config") == 1, args
+position = args.index("--speculative-config")
+assert args[position + 1] == expected, args
+assert "--no-spec-decode" not in args, args
+assert args.count(expected) == 1, args
+PY_MTP_ARGV
+check $? "MTP JSON is one argv item and replaces --no-spec-decode"
+MTP_META="$SB/home/.claude/logs/local-agents-configs/server_8102.meta"
+MTP_SPEC_JSON='{"method":"mtp","model":"/tmp/fake-mtp","num_speculative_tokens":3}'
+MTP_SPEC_SHA="$(
+    printf '%s' "$MTP_SPEC_JSON" |
+        /usr/bin/shasum -a 256 |
+        awk '{print $1}'
+)"
+MTP_META_CONTENT="$(cat "$MTP_META" 2>/dev/null)"
+assert_grep "spec_config_sha256=$MTP_SPEC_SHA" "$MTP_META_CONTENT" "MTP meta records speculative config identity"
+
 # ===========================================================================
 echo "== hotswap: rapid .meta identity record =="
 META="$SB/home/.claude/logs/local-agents-configs/server_8100.meta"
@@ -240,6 +272,12 @@ assert_grep "backend=rapid" "$META_CONTENT" "meta records backend=rapid"
 assert_grep "alias=rapid-qwen" "$META_CONTENT" "meta records the alias"
 assert_grep "model_dir=$SB/home/.models/FakeModel" "$META_CONTENT" "meta records the model dir"
 assert_grep "served_id=claude-opus-5" "$META_CONTENT" "meta records the served spoof id"
+EMPTY_SPEC_SHA="$(
+    printf '%s' "" |
+        /usr/bin/shasum -a 256 |
+        awk '{print $1}'
+)"
+assert_grep "spec_config_sha256=$EMPTY_SPEC_SHA" "$META_CONTENT" "plain meta records baseline spec identity"
 grep -q '^pid=' "$META" 2>/dev/null; check $? "meta records the server pid"
 
 # ===========================================================================
@@ -253,6 +291,46 @@ assert_grep "SUCCESS_PORT=8100" "$OUT" "reuse reports the same port"
 if [ -f "$ARGV_FILE" ]; then check 1 "reuse did NOT launch a new server"; else check 0 "reuse did NOT launch a new server"; fi
 # Reuse exits early, so no warmup probe should be fired either.
 if printf '%s' "$OUT" | grep -qF "Preflight warmup"; then check 1 "reuse skips preflight warmup"; else check 0 "reuse skips preflight warmup"; fi
+
+echo "== hotswap: changed spec config forbids stale reuse =="
+cat >>"$SB/config/config.local.sh" <<'CFG_SPEC_CHANGE'
+LA_RAPID_SPEC_CONFIG[rapid-qwen]='{"method":"mtp","model":"/tmp/reconfigured-mtp","num_speculative_tokens":2}'
+CFG_SPEC_CHANGE
+ARGV_FILE="$SB/argv-spec-change.json"
+rm -f "$ARGV_FILE"
+OUT=$(run local-llm-hotswap.sh rapid-qwen)
+assert_grep "SUCCESS_PORT=8103" "$OUT" "changed spec launches a new server instead of stale reuse"
+if printf '%s' "$OUT" | grep -qF "already healthy"; then
+    check 1 "changed spec does not report stale server healthy"
+else
+    check 0 "changed spec does not report stale server healthy"
+fi
+python3 - "$ARGV_FILE" <<'PY_SPEC_CHANGE'
+import json
+import sys
+
+args = json.load(open(sys.argv[1], encoding="utf-8"))
+expected = (
+    '{"method":"mtp","model":"/tmp/reconfigured-mtp",'
+    '"num_speculative_tokens":2}'
+)
+assert args.count("--speculative-config") == 1, args
+position = args.index("--speculative-config")
+assert args[position + 1] == expected, args
+assert "--no-spec-decode" not in args, args
+PY_SPEC_CHANGE
+check $? "changed spec config reaches the new server exactly"
+SPEC_CHANGE_META="$SB/home/.claude/logs/local-agents-configs/server_8103.meta"
+SPEC_CHANGE_JSON='{"method":"mtp","model":"/tmp/reconfigured-mtp","num_speculative_tokens":2}'
+SPEC_CHANGE_SHA="$(
+    printf '%s' "$SPEC_CHANGE_JSON" |
+        /usr/bin/shasum -a 256 |
+        awk '{print $1}'
+)"
+SPEC_CHANGE_META_CONTENT="$(
+    cat "$SPEC_CHANGE_META" 2>/dev/null
+)"
+assert_grep "spec_config_sha256=$SPEC_CHANGE_SHA" "$SPEC_CHANGE_META_CONTENT" "new server meta records changed spec identity"
 
 # ===========================================================================
 echo "== hotswap: rapid preflight warmup success (new launch) =="
@@ -302,7 +380,7 @@ cp -R "$SB/home/.claude" "$WRUN/home/.claude" 2>/dev/null || true
 # hotswap could not start, and no SUCCESS_PORT was ever printed. The previous version also tried to
 # bind its own stub on 8102 and died with "Address already in use", which is what made this look
 # like a warmup-skip failure rather than a port-exhaustion one.
-printf 'LA_PORT_START=8103\nLA_PORT_MAX=8105\n' >> "$WRUN/config/config.local.sh"
+printf 'LA_PORT_START=8105\nLA_PORT_MAX=8107\n' >> "$WRUN/config/config.local.sh"
 # Write the warmup log to a known-empty state (so "not written" is observable).
 _WARMUP_LOG="$WRUN/home/.stub/warmup_log.jsonl"; rm -f "$_WARMUP_LOG"
 # No hand-started stub here: the assertion is only that a launch still reports SUCCESS_PORT while
