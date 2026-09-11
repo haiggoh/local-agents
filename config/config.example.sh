@@ -120,6 +120,8 @@ LA_COUNCIL_NOTE=""
 la_register ornith-1.5-35b         Ornith-1.5-35B-A3B-MLX-4bit        rapid  hermes ""          false claude-opus-4-8           high  ""  ornith-ai/Ornith-1.5-35B-A3B-MLX-4bit              19.5
 la_register qwen-3.6-operator      Qwen3.6-27B-UD-MLX-4bit            mlx    qwen  ""          false claude-opus-4-8           high  ""  unsloth/Qwen3.6-27B-UD-MLX-4bit                   16
 la_register qwen-3.6-thinking      Qwen3.6-27B-UD-MLX-4bit            mlx    qwen  qwen3       true  claude-opus-4-8           high  ""  unsloth/Qwen3.6-27B-UD-MLX-4bit                   16
+la_register qwen-3.8-operator      Qwen3.8-27B-4bit                   mlx    qwen  ""          false claude-opus-4-8           high  ""  mlx-community/Qwen3.8-27B-4bit                    16 "{\"method\":\"mtp\",\"model\":\"$HOME/.models/Qwen3.8-27B-MTP-4bit\",\"num_speculative_tokens\":3,\"disable_auto_k\":false,\"continuous_batching\":false,\"allow_dynamic_membership\":false}"
+la_register qwen-3.8-thinking      Qwen3.8-27B-4bit                   mlx    qwen  qwen3       true  claude-opus-4-8           high  ""  mlx-community/Qwen3.8-27B-4bit                    16 "{\"method\":\"mtp\",\"model\":\"$HOME/.models/Qwen3.8-27B-MTP-4bit\",\"num_speculative_tokens\":3,\"disable_auto_k\":false,\"continuous_batching\":false,\"allow_dynamic_membership\":false}"
 la_register deepseek-r1-architect  DeepSeek-R1-Distill-Qwen-32B-4bit  mlx    qwen  deepseek_r1 true  claude-opus-4-8           max   ""  mlx-community/DeepSeek-R1-Distill-Qwen-32B-4bit    18
 la_register llama-scout            Llama-4-Scout-17B-16E-Instruct-4bit mlx_lm llama ""         false claude-haiku-4-5-20251001 low   ""  mlx-community/Llama-4-Scout-17B-16E-Instruct-4bit 60
 
@@ -135,10 +137,10 @@ LA_REV["ornith-1.5-35b"]=19504d912fa8fc7622bf6b1de3db5d5d890b1f02
 # at different efforts (an effort-split); several bindings for one role = your A/B choice. mode:
 # dispatch = curl-only (kept out of the interactive launch menu); session/both = launchable via csl.
 # Effort variants REUSE the aliased model's server (effort is a launcher flag, not a new model).
-la_role operator  qwen-3.6-operator     medium both      # fast operator — the workhorse default
-la_role operator  qwen-3.6-operator     high   both      # deeper operator (same server, higher effort)
-la_role operator  qwen-3.6-operator     xhigh  both      # deepest operator
-la_role reasoner  qwen-3.6-thinking     high   both      # thinking flavor (same weights, thinking on)
+la_role operator  qwen-3.8-operator     medium both      # MTP-backed workhorse default
+la_role operator  qwen-3.8-operator     high   both      # deeper operator (same MTP server)
+la_role operator  qwen-3.8-operator     xhigh  both      # deepest operator
+la_role reasoner  qwen-3.8-thinking     high   both      # MTP-backed thinking flavor
 la_role reasoner  deepseek-r1-architect max    both      # A/B reasoner — strongest local reasoner
 la_role validator deepseek-r1-architect max    dispatch  # independent review — dispatch (no tool_calls)
 la_role utility   llama-scout           low    dispatch  # cheap classification — dispatch-only

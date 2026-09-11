@@ -21,6 +21,24 @@ echo "la_resolve_target:"
 got="$(la_resolve_target qwen-3.6-operator)"
 check "an existing alias resolves to itself" "$got" "qwen-3.6-operator"
 
+got="$(la_resolve_target operator)"
+check "operator defaults to Qwen3.8 MTP" "$got" "qwen-3.8-operator"
+
+got="$(la_resolve_target reasoner)"
+check "reasoner defaults to Qwen3.8 MTP" "$got" "qwen-3.8-thinking"
+
+la_lookup qwen-3.8-operator || {
+  bad "qwen-3.8-operator lookup failed"
+}
+case "${LA_CUR_RAPID_SPEC_CONFIG:-}" in
+  *'"method":"mtp"'*Qwen3.8-27B-MTP-4bit*)
+    ok "operator default carries the Qwen3.8 MTP configuration"
+    ;;
+  *)
+    bad "operator default lacks the Qwen3.8 MTP configuration"
+    ;;
+esac
+
 # 2. A role name resolves to an ON-DISK alias bound to that role.
 for role in operator reasoner validator utility; do
   got="$(la_resolve_target "$role")" || { bad "role '$role' resolved to nothing"; continue; }
