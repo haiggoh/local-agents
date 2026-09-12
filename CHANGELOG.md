@@ -43,6 +43,29 @@ is not qualification.
   rewrite briefly removed the installer's write steps while it still printed
   `✓ local-* aliases written` and exited 0, creating no file at all.
 
+- Per-alias speculative-decoding configuration for the Rapid backend, via the
+  optional 12th `la_register` field `rapid_spec_json` (`LA_RAPID_SPEC_CONFIG`). An
+  alias carrying a configuration is launched with `--speculative-config`; an alias
+  without one keeps the previous `--no-spec-decode` behaviour, so no existing
+  registration changes.
+  The configuration is part of the server's REUSE IDENTITY: its SHA-256 is written
+  to the port metadata as `spec_config_sha256` and compared before an existing
+  server is reused, so a running server cannot be silently reused for an alias
+  whose speculative settings have since changed. Covered by
+  `tests/test_rapid_backend.sh`.
+
+- `qwen-3.8-operator` and `qwen-3.8-thinking`, registered on Qwen3.8-27B-4bit with
+  an MTP sidecar (`Qwen3.8-27B-MTP-4bit`, 3 speculative tokens) through the new
+  per-alias speculative configuration, and promoted to be the DEFAULT bindings for
+  the `operator` and `reasoner` roles — so `local-operator`, `csl` and a bare
+  `--model operator` dispatch now land on the MTP-backed Qwen3.8 pair instead of
+  Qwen3.6. The Qwen3.6 aliases remain registered and launchable for A/B against
+  recorded evidence. Covered by `tests/smoke_qwen38_mtp.sh` and three added
+  assertions in `tests/test_role_resolution.sh`, one of which pins that the
+  resolved `operator` default actually carries the MTP configuration — without it
+  a role could resolve correctly to an alias whose speculative config had been
+  dropped.
+
 ### Changed
 
 - The readiness gate is backend-neutral. The historical `LA_OMLX_*` names remain
@@ -55,6 +78,22 @@ is not qualification.
   one `local-dispatch` taking `--model <role|alias>`; added `local-validator`,
   `local-roles` and `local-disk`. `local-logs` now matches the `rapid_auto_*` and
   `omlx_*` logs the current backends actually write, not only `vllm_*`.
+
+### Fixed
+
+- `classifier-qualify.py` could describe a Stage-1 result as a genuine A/B when it
+  was not one, and could qualify a fixture belonging to the wrong classifier stage.
+  Stage identity is now ENFORCED rather than assumed: `validate_fixture_stage`
+  rejects a fixture whose shape does not match the stage it is being replayed as —
+  Stage 1 requires `max_tokens=64`, a segmented transcript and the severity closing
+  block; Stage 2 requires `max_tokens=8192`, exactly one message, and no
+  `stop_sequences` and no `tools`. The A/B is now explicit and mutually exclusive:
+  exactly one of `--stage1-fixture-b` (a second genuinely captured request) or
+  `--stage1-synthetic-b` must be given, fixture B must actually differ from fixture
+  A, and the report states which source was used — a synthesized B is reported as
+  synthetic instead of being presented as genuine A/B behaviour. Captured-body
+  SHA-256 is recorded for report provenance. Covered by
+  `tests/test_classifier_qualify.py` (+592 lines).
 
 ## [0.13.10] — 2026-09-08
 
