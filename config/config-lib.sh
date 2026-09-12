@@ -58,6 +58,35 @@ LA_SERVE_GENERIC="mlx auto"
 # every MLX model to an engine that cannot load safetensors at all.
 LA_MLX_BACKENDS="rapid vllm mlx_lm"
 
+# --- canonical Claude spoof identities: ONE place to edit when Anthropic ships a model ---------
+# Claude Code will only talk to a model id its org allowlist recognises, so every local server
+# answers to a Claude id it does not actually run ("spoofing"). Those ids therefore have to track
+# Anthropic's lineup — and they used to be written out literally on every la_register line (40 of
+# them), which made a new model a 40-line edit where any missed line KEEPS WORKING while serving a
+# stale id. Silent-stale, not loud-broken: the same failure shape as a shortcut that pins a roster
+# name. So the ids live here, once, and a registration may leave the spoof field EMPTY to inherit
+# them.
+#
+# LA_SPOOF_CURRENT is what a current Claude Code asks for; LA_SPOOF_PREVIOUS keeps one older client
+# working. When the next model lands (5-2, 6, …), move CURRENT down to PREVIOUS and put the new id
+# in CURRENT — one edit, and every registration that did not override follows.
+#
+# ⚠ Order is load-bearing, and the two backends do NOT treat the list alike:
+#   vllm-mlx serves EVERY id in the list, so either one satisfies a client.
+#   Rapid-MLX takes a single --served-model-name and gets only the FIRST id.
+# On Rapid the fallback id is therefore NOT reachable, which is why consumers must read the ids a
+# port actually advertises (/v1/models, or the per-port served_id in the meta file) instead of
+# assuming the configured primary. See tests/test_spoof_identity.sh.
+: "${LA_SPOOF_CURRENT:=claude-opus-5}"
+: "${LA_SPOOF_PREVIOUS:=claude-opus-4-8}"
+# The list la_register falls back to when its spoof field is empty. An overlay may override this
+# wholesale, and any single registration may still name its own ids (llama-scout pins a Haiku id).
+: "${LA_SPOOF_DEFAULT:=${LA_SPOOF_CURRENT},${LA_SPOOF_PREVIOUS}}"
+# Utility tier: a small/fast local model spoofs Haiku rather than Opus.
+: "${LA_SPOOF_UTILITY:=claude-haiku-4-5-20251001}"
+# The dense classifier identity Auto Mode exposes alongside the session id.
+: "${LA_SPOOF_CLASSIFIER:=claude-sonnet-5}"
+
 # --- model registry storage (populated by la_register in the config file) ----
 # Parallel arrays keyed by insertion; la_lookup fills LA_* vars for a given alias.
 LA_ALIASES=()
@@ -86,7 +115,12 @@ la_register() {
   # the config file may set LA_DEFAULT_MLX_BACKEND after (or never, leaving it to the default).
   LA_SUBDIR[$alias]="$2"; LA_SERVE[$alias]="$3"; LA_SERVE_DECLARED[$alias]="$3"
   LA_TOOLP[$alias]="$4"
-  LA_REASONP[$alias]="$5"; LA_THINK[$alias]="$6"; LA_SPOOF[$alias]="$7"; LA_EFFORT[$alias]="$8"
+  LA_REASONP[$alias]="$5"; LA_THINK[$alias]="$6"
+  # An empty spoof field inherits the central default, so a registration need not name any Claude
+  # model at all — that is what keeps a new Anthropic release a one-line change here.
+  LA_SPOOF[$alias]="${7:-$LA_SPOOF_DEFAULT}"
+  [ -n "${LA_SPOOF[$alias]}" ] || LA_SPOOF[$alias]="$LA_SPOOF_DEFAULT"
+  LA_EFFORT[$alias]="$8"
   LA_ROLES[$alias]="${9:-}"; LA_REPO[$alias]="${10:-}"; LA_SIZE[$alias]="${11:-}"
   LA_RAPID_SPEC_CONFIG[$alias]="${12:-}"
 }

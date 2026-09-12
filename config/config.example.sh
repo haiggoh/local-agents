@@ -95,7 +95,11 @@ LA_COUNCIL_NOTE=""
 #   reasoning_parser --reasoning-parser (qwen3|deepseek_r1|...) or "" for none
 #   thinking         true|false  (VLLM_MLX_ENABLE_THINKING; false = fast operator, true = reasoner)
 #   spoof_id         Claude model id Claude Code sends (org-allowlist workaround); the backend serves the
-#                    model under BOTH this id AND the alias. Usually claude-opus-4-8 / claude-haiku-4-5-20251001
+#                    model under BOTH this id AND the alias. LEAVE IT EMPTY ("") to inherit the
+#                    central LA_SPOOF_DEFAULT from config-lib.sh — that is the point: when Anthropic
+#                    ships a new model you edit LA_SPOOF_CURRENT once, not every line here. Pin an
+#                    id only for a tier that must differ (a utility tier spoofing Haiku, say
+#                    "$LA_SPOOF_UTILITY").
 #   effort           Claude Code --effort: low|medium|high|xhigh|max
 #   roles            OPTIONAL comma-separated role tags — operator|reasoner|validator|utility (and
 #                    any extras). This is what the rules route on. A role may be filled by several
@@ -117,13 +121,13 @@ LA_COUNCIL_NOTE=""
 # noticeably faster than Qwen 3.8 in early operational use. This is not a
 # controlled benchmark. Ornith thinking remains untested and is intentionally
 # absent from this public example.
-la_register ornith-1.5-35b         Ornith-1.5-35B-A3B-MLX-4bit        rapid  hermes ""          false claude-opus-4-8           high  ""  ornith-ai/Ornith-1.5-35B-A3B-MLX-4bit              19.5
-la_register qwen-3.6-operator      Qwen3.6-27B-UD-MLX-4bit            mlx    qwen  ""          false claude-opus-4-8           high  ""  unsloth/Qwen3.6-27B-UD-MLX-4bit                   16
-la_register qwen-3.6-thinking      Qwen3.6-27B-UD-MLX-4bit            mlx    qwen  qwen3       true  claude-opus-4-8           high  ""  unsloth/Qwen3.6-27B-UD-MLX-4bit                   16
-la_register qwen-3.8-operator      Qwen3.8-27B-4bit                   mlx    qwen  ""          false claude-opus-4-8           high  ""  mlx-community/Qwen3.8-27B-4bit                    16 "{\"method\":\"mtp\",\"model\":\"$HOME/.models/Qwen3.8-27B-MTP-4bit\",\"num_speculative_tokens\":3,\"disable_auto_k\":false,\"continuous_batching\":false,\"allow_dynamic_membership\":false}"
-la_register qwen-3.8-thinking      Qwen3.8-27B-4bit                   mlx    qwen  qwen3       true  claude-opus-4-8           high  ""  mlx-community/Qwen3.8-27B-4bit                    16 "{\"method\":\"mtp\",\"model\":\"$HOME/.models/Qwen3.8-27B-MTP-4bit\",\"num_speculative_tokens\":3,\"disable_auto_k\":false,\"continuous_batching\":false,\"allow_dynamic_membership\":false}"
-la_register deepseek-r1-architect  DeepSeek-R1-Distill-Qwen-32B-4bit  mlx    qwen  deepseek_r1 true  claude-opus-4-8           max   ""  mlx-community/DeepSeek-R1-Distill-Qwen-32B-4bit    18
-la_register llama-scout            Llama-4-Scout-17B-16E-Instruct-4bit mlx_lm llama ""         false claude-haiku-4-5-20251001 low   ""  mlx-community/Llama-4-Scout-17B-16E-Instruct-4bit 60
+la_register ornith-1.5-35b         Ornith-1.5-35B-A3B-MLX-4bit        rapid  hermes ""          false ""           high  ""  ornith-ai/Ornith-1.5-35B-A3B-MLX-4bit              19.5
+la_register qwen-3.6-operator      Qwen3.6-27B-UD-MLX-4bit            mlx    qwen  ""          false ""           high  ""  unsloth/Qwen3.6-27B-UD-MLX-4bit                   16
+la_register qwen-3.6-thinking      Qwen3.6-27B-UD-MLX-4bit            mlx    qwen  qwen3       true  ""           high  ""  unsloth/Qwen3.6-27B-UD-MLX-4bit                   16
+la_register qwen-3.8-operator      Qwen3.8-27B-4bit                   mlx    qwen  ""          false ""           high  ""  mlx-community/Qwen3.8-27B-4bit                    16 "{\"method\":\"mtp\",\"model\":\"$HOME/.models/Qwen3.8-27B-MTP-4bit\",\"num_speculative_tokens\":3,\"disable_auto_k\":false,\"continuous_batching\":false,\"allow_dynamic_membership\":false}"
+la_register qwen-3.8-thinking      Qwen3.8-27B-4bit                   mlx    qwen  qwen3       true  ""           high  ""  mlx-community/Qwen3.8-27B-4bit                    16 "{\"method\":\"mtp\",\"model\":\"$HOME/.models/Qwen3.8-27B-MTP-4bit\",\"num_speculative_tokens\":3,\"disable_auto_k\":false,\"continuous_batching\":false,\"allow_dynamic_membership\":false}"
+la_register deepseek-r1-architect  DeepSeek-R1-Distill-Qwen-32B-4bit  mlx    qwen  deepseek_r1 true  ""           max   ""  mlx-community/DeepSeek-R1-Distill-Qwen-32B-4bit    18
+la_register llama-scout            Llama-4-Scout-17B-16E-Instruct-4bit mlx_lm llama ""         false "$LA_SPOOF_UTILITY"      low   ""  mlx-community/Llama-4-Scout-17B-16E-Instruct-4bit 60
 
 
 # Pinned acquisition revision for the recommended Ornith artifact.

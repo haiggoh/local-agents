@@ -237,6 +237,11 @@ if [ "$SERVE" = "rapid" ]; then
     RAPID_CMD=(
         "$LA_RAPID_BIN" --no-telemetry
         serve "$MODEL_DIR"
+        # ⚠ Rapid takes ONE --served-model-name, so ONLY THE FIRST id of the spoof list is
+        # actually served here — unlike the vllm branch below, which serves every id. Do not add a
+        # second id expecting a fallback: it will 404. Any consumer that needs to know which id
+        # this port answers to must read /v1/models or the served_id line in the meta file, never
+        # the configured list. The ids themselves come from LA_SPOOF_CURRENT in config-lib.sh.
         --served-model-name "$SPOOF_PRIMARY"
         --host 127.0.0.1
         --port "$TARGET_PORT"
