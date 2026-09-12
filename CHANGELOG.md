@@ -81,6 +81,27 @@ is not qualification.
 
 ### Fixed
 
+- `local-llm-hotswap.sh` had no RAM preflight, while `launch-claude-agent.sh` has
+  been gated since `0.12.0`. hotswap is the path every local session's system
+  prompt names for placing sub-agent models on free ports, so an autonomous agent
+  could stack model servers until RAM died — the failure that forced the
+  2026-08-21 hardware reboot. FileVault is on, so a RAM-death reboot locks the
+  machine out of remote work; prevention is the only remedy. The gate sits AFTER
+  the port scan, so every reuse path is untouched (reusing a healthy server loads
+  no weights and must never be refused), and it REFUSES rather than evicting:
+  hotswap is invoked BY sessions that must stay alive, and any scanned port may
+  have a session attached. `LA_SKIP_RAM_PREFLIGHT=1` overrides, as in the launcher.
+
+- `la-ram-preflight.sh` question 0 could fail OPEN. Its reuse test was looser than
+  hotswap's — it ignored the served spoof id, the spec-config hash and
+  `LA_HOTSWAP_FORCE_FRESH` — so it reported "ALREADY served, no new weights load"
+  for a server hotswap then refused to reuse, and a real 16GB load passed an
+  impossible `LA_RAM_FLOOR_GB=999` (measured 2026-09-12: `:8000` served
+  `claude-opus-5` while config expected `claude-opus-4-8`). A gate that fails open
+  is worse than no gate, because callers trust it; question 0 now requires the same
+  conjunction hotswap does. Both covered by
+  `tests/test_hotswap_ram_preflight.sh` (11 checks, mutation-tested).
+
 - `classifier-qualify.py` could describe a Stage-1 result as a genuine A/B when it
   was not one, and could qualify a fixture belonging to the wrong classifier stage.
   Stage identity is now ENFORCED rather than assumed: `validate_fixture_stage`
