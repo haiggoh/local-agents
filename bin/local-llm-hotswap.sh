@@ -194,6 +194,32 @@ done
 [ -z "$TARGET_PORT" ] && { echo "❌ All ports $LA_PORT_START-$LA_PORT_MAX saturated."; exit 1; }
 LOG_FILE="${LOG_FILE_BASE}_${TARGET_PORT}.log"
 
+# --- RAM PREFLIGHT: only reached when a NEW server is about to load weights --------------------
+# Placed AFTER the port scan on purpose. Every reuse path above has already exited with
+# SUCCESS_PORT, and reusing a healthy server loads nothing — gating it would refuse a request that
+# costs no memory at all. From here on, weights WILL be read, so this is the last safe moment.
+#
+# Why hotswap needs its own gate: launch-claude-agent.sh has been gated since 0.12.0, but hotswap
+# is the path every local session's system prompt tells it to use to place sub-agent models on free
+# ports ("it never kills models on other ports"). An autonomous agent could therefore stack servers
+# until RAM died — the failure that forced the 2026-08-21 hardware reboot. FileVault is on, so a
+# RAM-death reboot locks the machine out of remote work: prevention is the only remedy.
+#
+# It REFUSES; it never evicts. hotswap is invoked BY sessions that must stay alive, and ports
+# $LA_PORT_START-$LA_PORT_MAX may each have a session attached, so killing to make room here could
+# take down the very caller asking for the model. Freeing memory stays an explicit human choice
+# (la-evict is manual crash recovery, not an admission policy).
+if [ -x "$HOTSWAP_DIR/la-ram-preflight.sh" ]; then
+    if ! "$HOTSWAP_DIR/la-ram-preflight.sh" "$MODEL_NAME"; then
+        echo
+        echo "🛑 Not launching $MODEL_NAME on port $TARGET_PORT — see the RAM preflight above."
+        echo "   Nothing was killed. Free memory yourself, or retry once a server exits."
+        echo "   Override with LA_SKIP_RAM_PREFLIGHT=1 if you are certain the numbers are wrong."
+        [ "${LA_SKIP_RAM_PREFLIGHT:-0}" = "1" ] || exit 1
+        echo "   LA_SKIP_RAM_PREFLIGHT=1 set — continuing at your own risk."
+    fi
+fi
+
 # --- Rapid-MLX branch ---------------------------------------------------------
 if [ "$SERVE" = "rapid" ]; then
     if [ ! -x "$LA_RAPID_BIN" ]; then

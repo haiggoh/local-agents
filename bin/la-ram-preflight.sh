@@ -58,7 +58,19 @@ FLOOR=${LA_RAM_FLOOR_GB:-16}
 PLOW=${LA_PORT_LOW:-8000}; PHIGH=${LA_PORT_HIGH:-8010}
 
 # ---- question 0: is this model already being served? Then nothing new is loaded at all. --------
+# This test must be NO LOOSER than the reuse test in local-llm-hotswap.sh. If it credits a reuse
+# that hotswap then refuses, the caller loads fresh weights while this script reports "no new
+# weights load" — the gate fails OPEN, which is worse than no gate because callers trust it.
+# Measured 2026-09-12: :8000 served claude-opus-5 while config expected claude-opus-4-8, hotswap
+# correctly declined reuse, and a 16GB load passed an impossible LA_RAM_FLOOR_GB=999.
+SPOOF_PRIMARY="${LA_CUR_SPOOF%%,*}"
+SPEC_SHA="$(printf '%s' "${LA_CUR_RAPID_SPEC_CONFIG:-}" | /usr/bin/shasum -a 256 | awk '{print $1}')"
+# A forced relaunch DOES load weights, so it can never be credited as a free reuse.
+if [[ "${LA_HOTSWAP_FORCE_FRESH:-0}" = "1" ]]; then
+  ((QUIET)) || printf 'ℹ️ LA_HOTSWAP_FORCE_FRESH=1 — a reuse cannot be credited; checking whether the load fits.\n'
+fi
 for p in $(seq "$PLOW" "$PHIGH"); do
+  [[ "${LA_HOTSWAP_FORCE_FRESH:-0}" = "1" ]] && break
   ids=$(curl -s --max-time 2 "http://localhost:$p/v1/models" 2>/dev/null | grep -o '"id":"[^"]*"' | cut -d'"' -f4)
   served=0
 
@@ -72,11 +84,16 @@ for p in $(seq "$PLOW" "$PHIGH"); do
     meta_model=$(awk -F= '$1=="model_dir"{print substr($0,index($0,"=")+1)}' "$meta" 2>/dev/null)
     meta_pid=$(awk -F= '$1=="pid"{print $2}' "$meta" 2>/dev/null)
 
+    meta_spec=$(awk -F= '$1=="spec_config_sha256"{print substr($0,index($0,"=")+1)}' "$meta" 2>/dev/null)
+    # Same conjunction hotswap requires: backend, alias, model dir, spec-config hash, live listener
+    # matching the recorded pid, AND the spoof id actually served on the port.
     if [[ "$meta_backend" = "rapid" &&
           "$meta_alias" = "$ALIAS" &&
           "$meta_model" = "$MODEL_DIR" &&
+          "$meta_spec" = "$SPEC_SHA" &&
           -n "$listener_pid" &&
-          "$listener_pid" = "$meta_pid" ]]; then
+          "$listener_pid" = "$meta_pid" ]] &&
+       grep -qxF "$SPOOF_PRIMARY" <<<"$ids"; then
       served=1
     fi
   fi
