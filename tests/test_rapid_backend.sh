@@ -80,8 +80,20 @@ reap_stale_stubs
 
 SB="$(mktemp -d "${TMPDIR:-/tmp}/la-rapid-test.XXXXXX")"
 mkdir -p "$SB/home/.models/FakeModel" "$SB/home/.stub" "$SB/home/.claude/logs/local-agents-configs"
-cp -R "$REPO/bin" "$SB/bin"
-cp -R "$REPO/config" "$SB/config"
+# -L DEREFERENCES symlinks. Load-bearing, learned the hard way 2026-09-12: a developer may
+# symlink the gitignored config/config.local.sh into a worktree to test against the real registry.
+# Plain `cp -R` copies that as a SYMLINK, and the `cat > "$SB/config/config.local.sh"` below then
+# follows it and overwrites the REAL private config with this fixture (FakeModel, stub binary, test
+# ports) — silently, with the suite still passing. -L copies the file's contents instead.
+cp -RL "$REPO/bin" "$SB/bin"
+cp -RL "$REPO/config" "$SB/config"
+# Belt and braces: never write a config path that is still a link out of the sandbox.
+for _f in "$SB/config/config.local.sh" "$SB/config/config.example.sh"; do
+  if [ -L "$_f" ]; then
+    echo "FATAL: $_f is a symlink — refusing to write through it to the real config" >&2
+    exit 1
+  fi
+done
 # A real weight file (>1MB) so the "metadata-only shell" guard passes.
 head -c 2097152 /dev/zero > "$SB/home/.models/FakeModel/weight.bin"
 
@@ -187,9 +199,17 @@ trap cleanup EXIT
 
 # Run a real script inside the sandbox. $1=script, rest=args. STUB_ARGV_FILE selects
 # where the stub records its argv.
+# LA_SKIP_RAM_PREFLIGHT=1 is REQUIRED here, and the reason is not laziness: hotswap's RAM gate
+# reads the REAL machine's free memory, while the sandbox registers a 2MB fake model declaring
+# size_gb 16. Whether that fixture "fits" then depends on what the host happens to be running, so
+# without this the whole suite passes or fails according to how much RAM is free — it failed on this
+# machine at 36.8 GB available with two model servers up, and passed minutes earlier with more head-
+# room. The gate itself is covered properly, with a stubbed preflight, in
+# tests/test_hotswap_ram_preflight.sh; here it is out of scope and must not add host dependence.
 run() {
   local script="$1"; shift
   ( trap - EXIT; cd "$SB" && HOME="$SB/home" STUB_ARGV_FILE="$ARGV_FILE" HOTSWAP_READY_TIMEOUT=15 \
+      LA_SKIP_RAM_PREFLIGHT=1 \
       bash "$SB/bin/$script" "$@" )
 }
 
@@ -391,7 +411,7 @@ _WARMUP_LOG="$WRUN/home/.stub/warmup_log.jsonl"; rm -f "$_WARMUP_LOG"
 # HOTSWAP_PREFLIGHT=0, which no code reads — so the skip was never actually requested and the test
 # asserted a skip that had not been asked for. A wrong env-var name fails OPEN and silently.
 OUT2=$(cd "$WRUN" && HOME="$WRUN/home" STUB_ARGV_FILE="$WRUN/argv5.json" HOTSWAP_READY_TIMEOUT=15 \
-       LA_HOTSWAP_PREFLIGHT=0 bash "$WRUN/bin/local-llm-hotswap.sh" rapid-qwen-fast)
+       LA_HOTSWAP_PREFLIGHT=0 LA_SKIP_RAM_PREFLIGHT=1 bash "$WRUN/bin/local-llm-hotswap.sh" rapid-qwen-fast)
 assert_grep "SUCCESS_PORT" "$OUT2" "still returns SUCCESS_PORT when warmup is skipped"
 if [ -f "$_WARMUP_LOG" ]; then
     _LOG_SIZE=$(wc -c < "$_WARMUP_LOG" 2>/dev/null | tr -d ' ')

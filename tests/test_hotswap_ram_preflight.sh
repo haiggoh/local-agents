@@ -79,7 +79,12 @@ alias_to_try="$( . "$REPO/config/config-lib.sh"; la_load_config >/dev/null 2>&1 
 
 # Point hotswap at the stub by shadowing its own bin/ copy inside a scratch clone of bin/.
 SCRATCH="$WORK/repo"; mkdir -p "$SCRATCH"
-cp -R "$REPO/bin" "$REPO/config" "$SCRATCH/" 2>/dev/null
+# -L dereferences: config/config.local.sh may be a symlink to the real private registry, and this
+# test APPENDS to the scratch config below. Copying the link would append to the real file.
+cp -RL "$REPO/bin" "$REPO/config" "$SCRATCH/" 2>/dev/null
+for _f in "$SCRATCH/config/config.local.sh" "$SCRATCH/config/config.example.sh"; do
+  [ -L "$_f" ] && { echo "FATAL: $_f is a symlink — refusing to write through it" >&2; exit 1; }
+done
 cp "$WORK/bin/la-ram-preflight.sh" "$SCRATCH/bin/la-ram-preflight.sh"
 # SAFETY, learned the hard way: config.example.sh assigns LA_PORT_START with a plain `=`, so an
 # environment override does NOT survive la_load_config and an early version of this test launched a
